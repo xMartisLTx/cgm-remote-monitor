@@ -1,0 +1,200 @@
+//@version=5
+indicator("SMC Sniper v2.0 — Signals", overlay=true, max_bars_back=500)
+
+// ─── PARAMETRAI ───────────────────────────────────────────────
+ema_fast_len  = input.int(50,  "EMA Greita",    group="Indikatoriai")
+ema_slow_len  = input.int(200, "EMA Lėta",      group="Indikatoriai")
+rsi_len       = input.int(14,  "RSI periodas",  group="Indikatoriai")
+atr_len       = input.int(14,  "ATR periodas",  group="Indikatoriai")
+adx_len       = input.int(14,  "ADX periodas",  group="Indikatoriai")
+min_score     = input.int(3,   "Min. balai (iš 5)", minval=1, maxval=5, group="Signalai")
+ob_lookback   = input.int(15,  "OB paieška (žvakės)", group="Signalai")
+bos_window    = input.int(15,  "BOS langas",    group="Signalai")
+show_ema      = input.bool(true,  "Rodyti EMA",        group="Rodymas")
+show_ob       = input.bool(true,  "Rodyti Order Blocks", group="Rodymas")
+show_signals  = input.bool(true,  "Rodyti signalus",   group="Rodymas")
+show_score    = input.bool(true,  "Rodyti balus",      group="Rodymas")
+rr_tp1        = input.float(2.0, "TP1 RR",      group="SL/TP")
+rr_tp2        = input.float(3.0, "TP2 RR",      group="SL/TP")
+
+// ─── INDIKATORIAI ─────────────────────────────────────────────
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+rsi      = ta.rsi(close, rsi_len)
+atr      = ta.atr(atr_len)
+[diplus, diminus, adx] = ta.dmi(adx_len, adx_len)
+
+// ─── EMA LINIJOS ──────────────────────────────────────────────
+plot(show_ema ? ema_fast : na, "EMA 50",  color=color.new(color.yellow, 0), linewidth=2)
+plot(show_ema ? ema_slow : na, "EMA 200", color=color.new(color.white,  0), linewidth=2)
+
+// ─── TENDENCIJA ───────────────────────────────────────────────
+bull_trend = ema_fast > ema_slow
+bear_trend = ema_fast < ema_slow
+trending   = adx > 18
+
+// ─── BOS ──────────────────────────────────────────────────────
+highest_high = ta.highest(high, bos_window)[1]
+lowest_low   = ta.lowest(low,   bos_window)[1]
+bos_bull = high > highest_high
+bos_bear = low  < lowest_low
+
+plotshape(show_signals and bos_bull, "BOS ↑", shape.triangleup,
+     location.belowbar, color.new(color.aqua, 30), size=size.tiny, text="BOS")
+plotshape(show_signals and bos_bear, "BOS ↓", shape.triangledown,
+     location.abovebar, color.new(color.orange, 30), size=size.tiny, text="BOS")
+
+// ─── CRT (Candle Range Theory) ────────────────────────────────
+prev_high = high[1]
+prev_low  = low[1]
+prev_mid  = (high[1] + low[1]) / 2
+
+crt_bull = low < prev_low  and close > prev_mid  // nušlavė žemumą, užsidarė aukščiau
+crt_bear = high > prev_high and close < prev_mid // nušlavė aukštumą, užsidarė žemiau
+
+plotshape(show_signals and crt_bull, "CRT ↑", shape.circle,
+     location.belowbar, color.new(color.lime, 20), size=size.tiny, text="CRT")
+plotshape(show_signals and crt_bear, "CRT ↓", shape.circle,
+     location.abovebar, color.new(color.red, 20), size=size.tiny, text="CRT")
+
+// ─── ORDER BLOCKS ─────────────────────────────────────────────
+var float ob_bull_high = na
+var float ob_bull_low  = na
+var float ob_bear_high = na
+var float ob_bear_low  = na
+
+// Bullish OB: bearish žvakė prieš stiprų kylimą
+if close[1] < open[1] and close > high[1]
+    ob_bull_high := high[1]
+    ob_bull_low  := low[1]
+
+// Bearish OB: bullish žvakė prieš stiprų kritimą
+if close[1] > open[1] and close < low[1]
+    ob_bear_high := high[1]
+    ob_bear_low  := low[1]
+
+// Rodyti OB zonas
+var box ob_bull_box = na
+var box ob_bear_box = na
+
+if show_ob and not na(ob_bull_high) and close >= ob_bull_low and close <= ob_bull_high
+    if not na(ob_bull_box)
+        box.delete(ob_bull_box)
+    ob_bull_box := box.new(bar_index - 5, ob_bull_high, bar_index + 10,
+         ob_bull_low, border_color=color.new(color.green, 50),
+         bgcolor=color.new(color.green, 85), border_width=1)
+
+if show_ob and not na(ob_bear_high) and close <= ob_bear_high and close >= ob_bear_low
+    if not na(ob_bear_box)
+        box.delete(ob_bear_box)
+    ob_bear_box := box.new(bar_index - 5, ob_bear_high, bar_index + 10,
+         ob_bear_low, border_color=color.new(color.red, 50),
+         bgcolor=color.new(color.red, 85), border_width=1)
+
+// ─── BALŲ SISTEMA ─────────────────────────────────────────────
+bull_score = 0
+bear_score = 0
+
+// 1. EMA tendencija
+bull_score += bull_trend ? 1 : 0
+bear_score += bear_trend ? 1 : 0
+
+// 2. ADX
+bull_score += trending ? 1 : 0
+bear_score += trending ? 1 : 0
+
+// 3. RSI
+bull_score += rsi < 60 ? 1 : 0
+bear_score += rsi > 40 ? 1 : 0
+
+// 4. BOS arba CRT
+bull_score += (bos_bull or crt_bull) ? 1 : 0
+bear_score += (bos_bear or crt_bear) ? 1 : 0
+
+// 5. OB arba Pullback zona
+in_bull_ob = not na(ob_bull_high) and close >= ob_bull_low and close <= ob_bull_high
+in_bear_ob = not na(ob_bear_high) and close <= ob_bear_high and close >= ob_bear_low
+pullback_bull = close > ema_slow and close < ema_fast * 1.002
+pullback_bear = close < ema_slow and close > ema_fast * 0.998
+
+bull_score += (in_bull_ob or pullback_bull) ? 1 : 0
+bear_score += (in_bear_ob or pullback_bear) ? 1 : 0
+
+// ─── SIGNALAI ─────────────────────────────────────────────────
+buy_signal  = bull_trend and bull_score >= min_score
+sell_signal = bear_trend and bear_score >= min_score
+
+// Signalų rodimas
+plotshape(show_signals and buy_signal, "BUY", shape.labelup,
+     location.belowbar, color.new(color.green, 0), size=size.normal,
+     text="BUY", textcolor=color.white)
+plotshape(show_signals and sell_signal, "SELL", shape.labeldown,
+     location.abovebar, color.new(color.red, 0), size=size.normal,
+     text="SELL", textcolor=color.white)
+
+// ─── SL / TP LINIJOS ──────────────────────────────────────────
+var line sl_line  = na
+var line tp1_line = na
+var line tp2_line = na
+
+if buy_signal
+    sl_dist = atr * 1.5
+    if not na(sl_line)  line.delete(sl_line)
+    if not na(tp1_line) line.delete(tp1_line)
+    if not na(tp2_line) line.delete(tp2_line)
+    sl_line  := line.new(bar_index, close - sl_dist,       bar_index + 20, close - sl_dist,
+         color=color.red,    width=2, style=line.style_dashed)
+    tp1_line := line.new(bar_index, close + sl_dist * rr_tp1, bar_index + 20, close + sl_dist * rr_tp1,
+         color=color.lime,   width=2, style=line.style_dashed)
+    tp2_line := line.new(bar_index, close + sl_dist * rr_tp2, bar_index + 20, close + sl_dist * rr_tp2,
+         color=color.green,  width=1, style=line.style_dotted)
+
+if sell_signal
+    sl_dist = atr * 1.5
+    if not na(sl_line)  line.delete(sl_line)
+    if not na(tp1_line) line.delete(tp1_line)
+    if not na(tp2_line) line.delete(tp2_line)
+    sl_line  := line.new(bar_index, close + sl_dist,           bar_index + 20, close + sl_dist,
+         color=color.red,    width=2, style=line.style_dashed)
+    tp1_line := line.new(bar_index, close - sl_dist * rr_tp1,  bar_index + 20, close - sl_dist * rr_tp1,
+         color=color.lime,   width=2, style=line.style_dashed)
+    tp2_line := line.new(bar_index, close - sl_dist * rr_tp2,  bar_index + 20, close - sl_dist * rr_tp2,
+         color=color.green,  width=1, style=line.style_dotted)
+
+// ─── INFO LENTELĖ ─────────────────────────────────────────────
+if show_score and barstate.islast
+    var table t = table.new(position.top_right, 2, 8,
+         bgcolor=color.new(color.black, 20), border_width=1)
+
+    table.cell(t, 0, 0, "SMC SNIPER v2.0",   text_color=color.yellow, text_size=size.normal)
+    table.cell(t, 1, 0, "",                   text_color=color.yellow)
+    table.cell(t, 0, 1, "Tendencija",         text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 1, bull_trend ? "BULL ↑" : "BEAR ↓",
+         text_color=bull_trend ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 0, 2, "ADX",               text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(math.round(adx, 1)) + (trending ? " ✓" : " ✗"),
+         text_color=trending ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 3, "RSI",               text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(math.round(rsi, 1)),
+         text_color=rsi < 40 ? color.lime : rsi > 60 ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 4, "BOS",               text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 4, bos_bull ? "BULL ✓" : bos_bear ? "BEAR ✓" : "—",
+         text_color=bos_bull ? color.lime : bos_bear ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 5, "CRT",               text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 5, crt_bull ? "BULL ✓" : crt_bear ? "BEAR ✓" : "—",
+         text_color=crt_bull ? color.lime : crt_bear ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 6, "BALAI",             text_color=color.white,  text_size=size.small)
+    table.cell(t, 1, 6, str.tostring(bull_trend ? bull_score : bear_score) + "/5",
+         text_color=color.yellow, text_size=size.small)
+    table.cell(t, 0, 7, "SIGNALAS",          text_color=color.white,  text_size=size.normal)
+    table.cell(t, 1, 7, buy_signal ? "BUY ✅" : sell_signal ? "SELL ✅" : "LAUKTI ⏳",
+         text_color=buy_signal ? color.lime : sell_signal ? color.red : color.orange,
+         text_size=size.normal)
+
+// ─── FONO SPALVA ──────────────────────────────────────────────
+bgcolor(buy_signal  ? color.new(color.green, 92) : na)
+bgcolor(sell_signal ? color.new(color.red,   92) : na)
+
+// ─── ALERT SĄLYGOS ────────────────────────────────────────────
+alertcondition(buy_signal,  "SMC BUY Signalas",  "SMC Sniper: BUY signalas {{ticker}} {{interval}}")
+alertcondition(sell_signal, "SMC SELL Signalas", "SMC Sniper: SELL signalas {{ticker}} {{interval}}")
