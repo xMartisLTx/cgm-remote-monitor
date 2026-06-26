@@ -1,104 +1,139 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © xMartisLTx
 //@version=6
-indicator("SMC Sniper v4.0", overlay = true, max_bars_back = 500)
+indicator("Forex Signalai v5.0", overlay=true)
 
-// ─── PARAMETRAI ───────────────────────────────────────────────
-emaFastLen = input.int(50,  "EMA 50",  group = "EMA")
-emaSlowLen = input.int(200, "EMA 200", group = "EMA")
-rsiLen     = input.int(14,  "RSI",     group = "Filtrai")
-atrLen     = input.int(14,  "ATR",     group = "Filtrai")
-rsiMin     = input.int(40,  "RSI min (40=neutralus)", group = "Filtrai")
-rsiMax     = input.int(60,  "RSI max (60=neutralus)", group = "Filtrai")
-coolBars   = input.int(50,  "Min. barų tarp signalų", group = "Filtrai")
-rrTp1      = input.float(2.0, "TP1 RR", group = "SL/TP")
-rrTp2      = input.float(3.0, "TP2 RR", group = "SL/TP")
+// ─── NUSTATYMAI ───────────────────────────────────────────────
+ema_fast_len     = input.int(21,  title="EMA Greitas",   group="EMA")
+ema_slow_len     = input.int(50,  title="EMA Lėtas",     group="EMA")
+ema_trend_len    = input.int(200, title="EMA Trend",     group="EMA")
+rsi_len          = input.int(14,  title="RSI Periodas",  group="RSI")
+rsi_ma_len       = input.int(14,  title="RSI MA",        group="RSI")
+rsi_buy_level    = input.int(55,  title="RSI PIRK virš", group="RSI")
+rsi_ma_buy_level = input.int(45,  title="RSI MA žemiau", group="RSI")
+coolBars         = input.int(30,  title="Min. barų tarp signalų", group="Filtrai")
 
 // ─── INDIKATORIAI ─────────────────────────────────────────────
-emaFast = ta.ema(close, emaFastLen)
-emaSlow = ta.ema(close, emaSlowLen)
-rsi     = ta.rsi(close, rsiLen)
-atr     = ta.atr(atrLen)
+ema_fast  = ta.ema(close, ema_fast_len)
+ema_slow  = ta.ema(close, ema_slow_len)
+ema_trend = ta.ema(close, ema_trend_len)
+rsi       = ta.rsi(close, rsi_len)
+rsi_ma    = ta.sma(rsi, rsi_ma_len)
 
-plot(emaFast, "EMA 50",  color = color.yellow, linewidth = 2)
-plot(emaSlow, "EMA 200", color = color.white,  linewidth = 2)
-
-// ─── TENDENCIJA ───────────────────────────────────────────────
-bullTrend = emaFast > emaSlow
-bearTrend = emaFast < emaSlow
-
-// ─── EMA50 KIRTIMAS — įvyksta TIK VIENĄ KARTĄ ────────────────
-// BUY: kaina kerta EMA50 iš apačios → atšoko (pullback pabaiga)
-// SELL: kaina kerta EMA50 iš viršaus → atmetė (pullback pabaiga)
-emaBounce = ta.crossover(close, emaFast)
-emaReject = ta.crossunder(close, emaFast)
-
-// ─── RSI NEUTRALI ZONA (ne perkrautas) ───────────────────────
-rsiOK = rsi > rsiMin and rsi < rsiMax
+uptrend   = close > ema_trend
+downtrend = close < ema_trend
 
 // ─── COOLDOWN ─────────────────────────────────────────────────
 var int lastBar = 0
 enoughBars = (bar_index - lastBar) >= coolBars
 
-// ─── GALUTINIS SIGNALAS ───────────────────────────────────────
-// BUY:  bull tendencija + kaina atšoko nuo EMA50 + RSI neutralus
-// SELL: bear tendencija + kaina atmetė nuo EMA50 + RSI neutralus
-buySignal  = bullTrend and emaBounce and rsiOK and enoughBars
-sellSignal = bearTrend and emaReject and rsiOK and enoughBars
+// ─── SIGNALAI (visi naudoja kirtimą — įvyksta TIK VIENĄ kartą) ───
+ema_buy  = ta.crossover(ema_fast, ema_slow)  and uptrend   and rsi > 50 and enoughBars
+ema_sell = ta.crossunder(ema_fast, ema_slow) and downtrend and rsi < 50 and enoughBars
 
-if buySignal or sellSignal
+// RSI kirtimas (ne paprasta sąlyga) — vienas baras
+rsi_buy  = ta.crossover(rsi, rsi_buy_level)    and rsi_ma < rsi_ma_buy_level and uptrend   and enoughBars
+rsi_sell = ta.crossunder(rsi, rsi_ma_buy_level) and rsi_ma > rsi_buy_level   and downtrend and enoughBars
+
+strong_buy  = ema_buy  and rsi_buy
+strong_sell = ema_sell and rsi_sell
+
+// Atnaujinti cooldown po bet kurio signalo
+anySignal = ema_buy or ema_sell or rsi_buy or rsi_sell
+if anySignal
     lastBar := bar_index
 
-// ─── SIGNALŲ RODYMAS ──────────────────────────────────────────
-plotshape(buySignal,  "BUY",  shape.labelup,
-     location.belowbar, color.green,
-     size = size.large, text = "BUY", textcolor = color.white)
-plotshape(sellSignal, "SELL", shape.labeldown,
-     location.abovebar, color.red,
-     size = size.large, text = "SELL", textcolor = color.white)
+// ─── EMA LINIJOS ──────────────────────────────────────────────
+plot(ema_fast,  color=color.new(color.yellow, 0), linewidth=1, title="EMA 21")
+plot(ema_slow,  color=color.new(color.purple, 0), linewidth=1, title="EMA 50")
+plot(ema_trend, color=color.new(color.red,    0), linewidth=2, title="EMA 200")
 
-// ─── SL / TP LINIJOS ──────────────────────────────────────────
-slDist = atr * 1.5
+// ─── SIGNALŲ ŽENKLIUKAI ───────────────────────────────────────
+plotshape(ema_buy and not strong_buy,
+    title="EMA PIRK", location=location.belowbar,
+    color=color.green, style=shape.triangleup,
+    size=size.small, text="PIRK", textcolor=color.white)
 
-if buySignal
-    line.new(bar_index, close - slDist,         bar_index + 30, close - slDist,
-         color = color.red,   width = 2, style = line.style_dashed)
-    line.new(bar_index, close + slDist * rrTp1, bar_index + 30, close + slDist * rrTp1,
-         color = color.lime,  width = 2, style = line.style_dashed)
-    line.new(bar_index, close + slDist * rrTp2, bar_index + 30, close + slDist * rrTp2,
-         color = color.green, width = 1, style = line.style_dotted)
+plotshape(ema_sell and not strong_sell,
+    title="EMA PARDUOK", location=location.abovebar,
+    color=color.red, style=shape.triangledown,
+    size=size.small, text="PARDUOK", textcolor=color.white)
 
-if sellSignal
-    line.new(bar_index, close + slDist,         bar_index + 30, close + slDist,
-         color = color.red,   width = 2, style = line.style_dashed)
-    line.new(bar_index, close - slDist * rrTp1, bar_index + 30, close - slDist * rrTp1,
-         color = color.lime,  width = 2, style = line.style_dashed)
-    line.new(bar_index, close - slDist * rrTp2, bar_index + 30, close - slDist * rrTp2,
-         color = color.green, width = 1, style = line.style_dotted)
+plotshape(rsi_buy and not strong_buy,
+    title="RSI PIRK", location=location.belowbar,
+    color=color.blue, style=shape.triangleup,
+    size=size.normal, text="PIRK", textcolor=color.white)
 
-// ─── INFO LENTELĖ ─────────────────────────────────────────────
-var table t = table.new(position.top_right, 2, 5,
-     bgcolor = color.new(color.black, 15), border_width = 1)
+plotshape(rsi_sell and not strong_sell,
+    title="RSI PARDUOK", location=location.abovebar,
+    color=color.fuchsia, style=shape.triangledown,
+    size=size.normal, text="PARDUOK", textcolor=color.white)
+
+plotshape(strong_buy,
+    title="STIPRUS PIRK", location=location.belowbar,
+    color=color.aqua, style=shape.diamond,
+    size=size.large, text="★ PIRK", textcolor=color.white)
+
+plotshape(strong_sell,
+    title="STIPRUS PARDUOK", location=location.abovebar,
+    color=color.orange, style=shape.diamond,
+    size=size.large, text="★ PARDUOK", textcolor=color.white)
+
+// ─── FONAS (tik signalo žvakėje) ─────────────────────────────
+bgcolor(strong_buy  ? color.new(color.aqua,   85) :
+        ema_buy     ? color.new(color.green,  90) :
+        rsi_buy     ? color.new(color.blue,   90) : na)
+bgcolor(strong_sell ? color.new(color.orange, 85) :
+        ema_sell    ? color.new(color.red,    90) :
+        rsi_sell    ? color.new(color.fuchsia,90) : na)
+
+// ─── INFORMACINIS LANGELIS ────────────────────────────────────
+var table t = table.new(position.top_right, 2, 7,
+    bgcolor=color.new(color.black, 65),
+    border_width=1, border_color=color.new(color.gray, 50))
 
 if barstate.islast
-    sigText  = buySignal ? "BUY ✅" : sellSignal ? "SELL ✅" : "LAUKTI ⏳"
-    sigColor = buySignal ? color.lime : sellSignal ? color.red : color.orange
     barsWait = coolBars - (bar_index - lastBar)
     waitStr  = barsWait > 0 ? str.tostring(barsWait) + " barų" : "Paruošta"
 
-    table.cell(t, 0, 0, "SMC SNIPER v4",  text_color = color.yellow, text_size = size.normal)
-    table.cell(t, 1, 0, "",               text_color = color.yellow, text_size = size.normal)
-    table.cell(t, 0, 1, "Tendencija",     text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 1, bullTrend ? "BULL ↑" : "BEAR ↓",
-         text_color = bullTrend ? color.lime : color.red, text_size = size.small)
-    table.cell(t, 0, 2, "RSI",            text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 2, str.tostring(math.round(rsi, 1)),
-         text_color = rsi < 40 ? color.lime : rsi > 60 ? color.red : color.gray,
-         text_size = size.small)
-    table.cell(t, 0, 3, "Cooldown",       text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 3, waitStr,
-         text_color = enoughBars ? color.lime : color.orange, text_size = size.small)
-    table.cell(t, 0, 4, "SIGNALAS",       text_color = color.white,  text_size = size.normal)
-    table.cell(t, 1, 4, sigText,          text_color = sigColor,      text_size = size.normal)
+    table.cell(t, 0, 0, "FOREX v5.0",    text_color=color.white,  text_size=size.normal, bgcolor=color.new(color.navy, 20))
+    table.cell(t, 1, 0, syminfo.ticker,  text_color=color.yellow, text_size=size.normal, bgcolor=color.new(color.navy, 20))
+    table.cell(t, 0, 1, "Trend:",        text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 1, uptrend ? "⬆ UP" : "⬇ DOWN",
+        text_color=uptrend ? color.green : color.red, text_size=size.normal)
+    table.cell(t, 0, 2, "EMA:",          text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 2, ema_fast > ema_slow ? "🟢 BULL" : "🔴 BEAR",
+        text_color=ema_fast > ema_slow ? color.green : color.red, text_size=size.normal)
+    table.cell(t, 0, 3, "RSI:",          text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 3, str.tostring(math.round(rsi, 1)),
+        text_color=rsi > 55 ? color.blue : rsi < 45 ? color.fuchsia : color.gray, text_size=size.normal)
+    table.cell(t, 0, 4, "RSI MA:",       text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 4, str.tostring(math.round(rsi_ma, 1)),
+        text_color=rsi_ma < 45 ? color.blue : rsi_ma > 55 ? color.fuchsia : color.yellow, text_size=size.normal)
+    table.cell(t, 0, 5, "Cooldown:",     text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 5, waitStr,
+        text_color=enoughBars ? color.lime : color.orange, text_size=size.normal)
+    table.cell(t, 0, 6, "Signalas:",     text_color=color.gray,   text_size=size.normal)
+    table.cell(t, 1, 6,
+        strong_buy  ? "★ PIRK"     :
+        strong_sell ? "★ PARDUOK"  :
+        ema_buy     ? "🟢 PIRK"    :
+        ema_sell    ? "🔴 PARDUOK" :
+        rsi_buy     ? "🔵 PIRK"    :
+        rsi_sell    ? "🌸 PARDUOK" : "⏳ Laukti",
+        text_color=
+        strong_buy  ? color.aqua   :
+        strong_sell ? color.orange :
+        ema_buy     ? color.green  :
+        ema_sell    ? color.red    :
+        rsi_buy     ? color.blue   :
+        rsi_sell    ? color.fuchsia : color.yellow,
+        text_size=size.normal)
 
 // ─── ALERTAI ──────────────────────────────────────────────────
-alertcondition(buySignal,  "BUY",  "SMC Sniper: BUY {{ticker}} {{interval}}")
-alertcondition(sellSignal, "SELL", "SMC Sniper: SELL {{ticker}} {{interval}}")
+alertcondition(strong_buy,  title="★ STIPRUS PIRK",    message="★ STIPRUS PIRK! {{ticker}} {{close}}")
+alertcondition(strong_sell, title="★ STIPRUS PARDUOK", message="★ STIPRUS PARDUOK! {{ticker}} {{close}}")
+alertcondition(ema_buy,     title="🟢 EMA PIRK",       message="EMA PIRK! {{ticker}}")
+alertcondition(ema_sell,    title="🔴 EMA PARDUOK",    message="EMA PARDUOK! {{ticker}}")
+alertcondition(rsi_buy,     title="🔵 RSI PIRK",       message="RSI PIRK! {{ticker}}")
+alertcondition(rsi_sell,    title="🌸 RSI PARDUOK",    message="RSI PARDUOK! {{ticker}}")
