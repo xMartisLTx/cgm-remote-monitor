@@ -1,14 +1,16 @@
 //+------------------------------------------------------------------+
-//| EMA200 Cross EA v1.0                                             |
+//| EMA200 Cross EA v1.1                                             |
 //| Perka kai žvakė kerta EMA200 aukštyn                            |
 //| Parduoda kai žvakė kerta EMA200 žemyn                           |
 //+------------------------------------------------------------------+
 #property copyright "Forex Signalai v5.0"
-#property version   "1.0"
+#property version   "1.1"
 #property strict
 
 //--- Parametrai
-input double RiskPercent      = 1.0;   // Rizika % per sandorį
+input bool   UseFixedRisk     = true;  // true = fiksuota EUR suma, false = %
+input double FixedRiskEUR     = 10.0;  // Fiksuota rizika EUR per sandorį
+input double RiskPercent      = 1.0;   // Rizika % (naudojama jei UseFixedRisk=false)
 input double RR_TP            = 2.0;   // Take-Profit RR (2 = 1:2)
 input int    EMA_Period       = 200;   // EMA periodas (raudona linija)
 input int    ATR_Period       = 14;    // ATR SL skaičiavimui
@@ -104,8 +106,8 @@ void OpenTrade(int signal)
    sl = NormalizeDouble(sl, Digits);
    tp = NormalizeDouble(tp, Digits);
 
-   // ─── LOT SKAIČIAVIMAS (pagal rizikos %) ───────────────────────
-   double riskAmt  = AccountBalance() * (RiskPercent / 100.0);
+   // ─── LOT SKAIČIAVIMAS ─────────────────────────────────────────
+   double riskAmt  = UseFixedRisk ? FixedRiskEUR : AccountBalance() * (RiskPercent / 100.0);
    double tickVal  = MarketInfo(Symbol(), MODE_TICKVALUE);
    double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
    double lotStep  = MarketInfo(Symbol(), MODE_LOTSTEP);
