@@ -87,11 +87,21 @@ bearScore += hasTriggerBear   ? 1 : 0
 bearScore += inBearOB         ? 1 : 0
 bearScore += close < emaSlow  ? 1 : 0
 
-// ─── SIGNALAI — tik kai BOS/CRT aktyvus, tik PIRMAS baras ─────
-buyRaw     = bullTrend and hasTriggerBull and bullScore >= minScore
-sellRaw    = bearTrend and hasTriggerBear and bearScore >= minScore
-buySignal  = buyRaw  and not buyRaw[1]
-sellSignal = sellRaw and not sellRaw[1]
+// ─── SIGNALAI — cooldown 10 barų tarp signalų ────────────────
+var int lastSignalBar = 0
+cooldown = 10
+
+buyRaw  = bullTrend and hasTriggerBull and bullScore >= minScore
+sellRaw = bearTrend and hasTriggerBear and bearScore >= minScore
+
+newBuy  = buyRaw  and not buyRaw[1]  and (bar_index - lastSignalBar) >= cooldown
+newSell = sellRaw and not sellRaw[1] and (bar_index - lastSignalBar) >= cooldown
+
+if newBuy or newSell
+    lastSignalBar := bar_index
+
+buySignal  = newBuy
+sellSignal = newSell
 
 plotshape(buySignal,  "BUY",  shape.labelup,
      location.belowbar, color.new(color.green, 0),
