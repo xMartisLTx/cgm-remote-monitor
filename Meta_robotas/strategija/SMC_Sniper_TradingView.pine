@@ -139,27 +139,33 @@ var line tp2_line = na
 
 if buy_signal
     sl_dist = atr * 1.5
-    if not na(sl_line)  line.delete(sl_line)
-    if not na(tp1_line) line.delete(tp1_line)
-    if not na(tp2_line) line.delete(tp2_line)
-    sl_line  := line.new(bar_index, close - sl_dist,       bar_index + 20, close - sl_dist,
-         color=color.red,    width=2, style=line.style_dashed)
+    if not na(sl_line)
+        line.delete(sl_line)
+    if not na(tp1_line)
+        line.delete(tp1_line)
+    if not na(tp2_line)
+        line.delete(tp2_line)
+    sl_line  := line.new(bar_index, close - sl_dist, bar_index + 20, close - sl_dist,
+         color=color.red, width=2, style=line.style_dashed)
     tp1_line := line.new(bar_index, close + sl_dist * rr_tp1, bar_index + 20, close + sl_dist * rr_tp1,
-         color=color.lime,   width=2, style=line.style_dashed)
+         color=color.lime, width=2, style=line.style_dashed)
     tp2_line := line.new(bar_index, close + sl_dist * rr_tp2, bar_index + 20, close + sl_dist * rr_tp2,
-         color=color.green,  width=1, style=line.style_dotted)
+         color=color.green, width=1, style=line.style_dotted)
 
 if sell_signal
     sl_dist = atr * 1.5
-    if not na(sl_line)  line.delete(sl_line)
-    if not na(tp1_line) line.delete(tp1_line)
-    if not na(tp2_line) line.delete(tp2_line)
-    sl_line  := line.new(bar_index, close + sl_dist,           bar_index + 20, close + sl_dist,
-         color=color.red,    width=2, style=line.style_dashed)
-    tp1_line := line.new(bar_index, close - sl_dist * rr_tp1,  bar_index + 20, close - sl_dist * rr_tp1,
-         color=color.lime,   width=2, style=line.style_dashed)
-    tp2_line := line.new(bar_index, close - sl_dist * rr_tp2,  bar_index + 20, close - sl_dist * rr_tp2,
-         color=color.green,  width=1, style=line.style_dotted)
+    if not na(sl_line)
+        line.delete(sl_line)
+    if not na(tp1_line)
+        line.delete(tp1_line)
+    if not na(tp2_line)
+        line.delete(tp2_line)
+    sl_line  := line.new(bar_index, close + sl_dist, bar_index + 20, close + sl_dist,
+         color=color.red, width=2, style=line.style_dashed)
+    tp1_line := line.new(bar_index, close - sl_dist * rr_tp1, bar_index + 20, close - sl_dist * rr_tp1,
+         color=color.lime, width=2, style=line.style_dashed)
+    tp2_line := line.new(bar_index, close - sl_dist * rr_tp2, bar_index + 20, close - sl_dist * rr_tp2,
+         color=color.green, width=1, style=line.style_dotted)
 
 // ─── INFO LENTELĖ ─────────────────────────────────────────────
 if show_score and barstate.islast
