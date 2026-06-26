@@ -69,30 +69,36 @@ bgcolor(inBullOB ? color.new(color.green, 88) : na)
 bgcolor(inBearOB ? color.new(color.red,   88) : na)
 
 // ─── BALŲ SISTEMA ─────────────────────────────────────────────
+// BOS arba CRT privalomas
+hasTriggerBull = bosBull or crtBull
+hasTriggerBear = bosBear or crtBear
+
 bullScore = 0
-bullScore += bullTrend               ? 1 : 0
-bullScore += rsi < 60                ? 1 : 0
-bullScore += bosBull or crtBull      ? 1 : 0
-bullScore += inBullOB                ? 1 : 0
-bullScore += close > emaSlow         ? 1 : 0
+bullScore += bullTrend        ? 1 : 0
+bullScore += rsi < 55         ? 1 : 0
+bullScore += hasTriggerBull   ? 1 : 0
+bullScore += inBullOB         ? 1 : 0
+bullScore += close > emaSlow  ? 1 : 0
 
 bearScore = 0
-bearScore += bearTrend               ? 1 : 0
-bearScore += rsi > 40                ? 1 : 0
-bearScore += bosBear or crtBear      ? 1 : 0
-bearScore += inBearOB                ? 1 : 0
-bearScore += close < emaSlow         ? 1 : 0
+bearScore += bearTrend        ? 1 : 0
+bearScore += rsi > 45         ? 1 : 0
+bearScore += hasTriggerBear   ? 1 : 0
+bearScore += inBearOB         ? 1 : 0
+bearScore += close < emaSlow  ? 1 : 0
 
-// ─── SIGNALAI ─────────────────────────────────────────────────
-buySignal  = bullTrend and bullScore >= minScore
-sellSignal = bearTrend and bearScore >= minScore
+// ─── SIGNALAI — tik kai BOS/CRT aktyvus, tik PIRMAS baras ─────
+buyRaw     = bullTrend and hasTriggerBull and bullScore >= minScore
+sellRaw    = bearTrend and hasTriggerBear and bearScore >= minScore
+buySignal  = buyRaw  and not buyRaw[1]
+sellSignal = sellRaw and not sellRaw[1]
 
 plotshape(buySignal,  "BUY",  shape.labelup,
      location.belowbar, color.new(color.green, 0),
-     size = size.normal, text = "BUY",  textcolor = color.white)
+     size = size.large, text = "BUY",  textcolor = color.white)
 plotshape(sellSignal, "SELL", shape.labeldown,
      location.abovebar, color.new(color.red, 0),
-     size = size.normal, text = "SELL", textcolor = color.white)
+     size = size.large, text = "SELL", textcolor = color.white)
 
 // ─── SL / TP ──────────────────────────────────────────────────
 slDist = atr * 1.5
