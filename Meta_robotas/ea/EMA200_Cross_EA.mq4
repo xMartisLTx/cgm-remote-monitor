@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //| EMA200 Cross EA v3.0                                             |
-//| - Max 3 sandoriai vienu metu                                    |
-//| - Naujas sandoris tik kai esamo SL užrakintas +10€              |
+//| - Max 3 sandoriai vienu metu (visi gali būti su SL < 0)        |
+//| - Naujas sandoris kai BENT VIENAS SL užrakintas +10€            |
 //| - Trailing Stop seka kainą                                      |
 //| - Auto Compound pagal balansą                                   |
 //+------------------------------------------------------------------+
@@ -85,9 +85,9 @@ double GetLockedProfit(int orderIndex)
 }
 
 //+------------------------------------------------------------------+
-//| Tikrina ar VISI esami sandoriai turi SL užrakintą >= SL_LockMin |
+//| Tikrina ar BENT VIENAS sandoris turi SL užrakintą >= SL_LockMin |
 //+------------------------------------------------------------------+
-bool AllTradesSecured()
+bool AnyTradeSecured()
 {
    for (int i = 0; i < OrdersTotal(); i++)
    {
@@ -96,16 +96,18 @@ bool AllTradesSecured()
       if (OrderSymbol() != Symbol())                   continue;
 
       double locked = GetLockedProfit(i);
-      if (locked < SL_LockMin)
+      if (locked >= SL_LockMin)
       {
          if (ShowDebug)
             Print("[INFO] Sandoris #", OrderTicket(),
-                  " užrakintas tik ", DoubleToString(locked, 2),
-                  "€ (reikia ", SL_LockMin, "€) — naujas sandoris blokuotas");
-         return false;
+                  " užrakintas +", DoubleToString(locked, 2),
+                  "€ — leidžiamas naujas sandoris");
+         return true;
       }
    }
-   return true;
+   if (ShowDebug)
+      Print("[INFO] Nė vienas sandoris neužrakintas +", SL_LockMin, "€ — naujas blokuotas");
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -134,8 +136,8 @@ void OnTick()
    // Blokuoti jei pasiektas maks. sandorių skaičius
    if (openCount >= MaxTrades) return;
 
-   // Jei jau yra sandorių — tikrinti ar SL užrakintas
-   if (openCount > 0 && !AllTradesSecured()) return;
+   // Jei jau yra sandorių — bent vienas turi būti užrakintas +10€
+   if (openCount > 0 && !AnyTradeSecured()) return;
 
    // ─── SESIJŲ FILTRAS ───────────────────────────────────────────
    if (UseSessionFilter)
