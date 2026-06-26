@@ -1,316 +1,317 @@
 //+------------------------------------------------------------------+
-//|  SMC Sniper EA — Pilna versija                                   |
-//|  Strategija: SMC + EMA + RSI + Sesijų filtras + Risk Management |
+//|  SMC Sniper EA v2.0 — su CRT + TBS + Debug                      |
+//|  Pataisyta: atsipalaidavusios sąlygos, CRT pridėtas             |
 //+------------------------------------------------------------------+
-#property copyright "SMC Sniper EA"
-#property version   "1.0"
+#property copyright "SMC Sniper EA v2.0"
+#property version   "2.0"
 #property strict
 
-//--- Įvesties parametrai
-input double RiskPercent     = 1.0;    // Rizika % per sandorį
-input double RR_TP1          = 2.0;    // Take-Profit 1 (RR santykis)
-input double RR_TP2          = 3.0;    // Take-Profit 2 (RR santykis)
-input int    EMA_Fast        = 50;     // Greita EMA
-input int    EMA_Slow        = 200;    // Lėta EMA
-input int    RSI_Period      = 14;     // RSI periodas
-input double RSI_Buy_Max     = 52.0;   // RSI maks. pirkimui
-input double RSI_Sell_Min    = 48.0;   // RSI min. pardavimui
-input int    OB_Lookback     = 10;     // Order Block paieška (žvakės)
-input int    BOS_Window      = 20;     // BOS paieška (žvakės)
-input int    MaxLossStreak   = 3;      // Pauzė po N pralaimėjimų
-input double MaxDailyLossPct = 2.0;    // Dienos nuostolių limitas %
-input bool   UseSessionFilter= true;   // Sesijų filtras
-input int    London_Start    = 8;      // London sesija pradžia (GMT)
-input int    London_End      = 12;     // London sesija pabaiga (GMT)
-input int    NY_Start        = 13;     // NY sesija pradžia (GMT)
-input int    NY_End          = 17;     // NY sesija pabaiga (GMT)
-input int    MagicNumber     = 20240101;
-input string EA_Comment      = "SMC_Sniper";
+//--- Parametrai
+input double RiskPercent      = 1.0;    // Rizika % per sandorį
+input double RR_TP1           = 2.0;    // Take-Profit 1 RR
+input double RR_TP2           = 3.0;    // Take-Profit 2 RR
+input int    EMA_Fast         = 50;     // Greita EMA
+input int    EMA_Slow         = 200;    // Lėta EMA
+input int    RSI_Period       = 14;     // RSI periodas
+input int    ATR_Period       = 14;     // ATR periodas
+input int    MinScoreRequired = 3;      // Min. balų signalui (iš 5)
+input bool   UseSessionFilter = true;   // Sesijų filtras
+input int    London_Start     = 7;      // London pradžia GMT
+input int    London_End       = 12;     // London pabaiga GMT
+input int    NY_Start         = 13;     // NY pradžia GMT
+input int    NY_End           = 18;     // NY pabaiga GMT
+input int    MaxLossStreak    = 3;      // Pauzė po N pralaimėjimų
+input double MaxDailyLossPct  = 3.0;   // Dienos nuostolių limitas %
+input bool   UseCRT           = true;   // CRT filtras
+input bool   ShowDebug        = true;   // Rodyti debug info
+input int    MagicNumber      = 20240202;
+input string EA_Comment       = "SMC_v2";
 
-//--- Globalūs kintamieji
-int    g_LossStreak      = 0;
-double g_DayStartBalance = 0;
-datetime g_LastTradeDay  = 0;
-datetime g_LastBarTime   = 0;
+//--- Globalūs
+int      g_LossStreak      = 0;
+double   g_DayStartBalance = 0;
+datetime g_LastTradeDay    = 0;
+datetime g_LastBarTime     = 0;
 
-//+------------------------------------------------------------------+
-//| Inicializacija                                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
    g_DayStartBalance = AccountBalance();
-   g_LastTradeDay    = 0;
-   g_LossStreak      = 0;
-   Print("SMC Sniper EA paleistas. Balansas: ", AccountBalance());
+   Print("=== SMC Sniper v2.0 paleistas ===");
+   Print("Balansas: $", AccountBalance(), " | Pora: ", Symbol(), " | TF: ", Period());
    return INIT_SUCCEEDED;
 }
 
 //+------------------------------------------------------------------+
-//| Pagrindinis ciklas — kiekvienas tikas                            |
-//+------------------------------------------------------------------+
 void OnTick()
 {
-   // Nauja žvakė tik vieną kartą
    if (Time[0] == g_LastBarTime) return;
    g_LastBarTime = Time[0];
 
-   // Dienos balanso atstatymas
    ResetDailyBalance();
-
-   // Atnaujinti pralaimėjimų seriją
    UpdateLossStreak();
-
-   // Tvarkyti atviras pozicijas (trailing stop, BE)
    ManageOpenTrades();
 
-   // Jei jau yra atvira pozicija — neatidarome kitos
    if (CountOpenTrades() > 0) return;
 
-   // Tikrinimų filtrai
-   if (!PassFilters()) return;
+   string blockReason = "";
+   if (!PassFilters(blockReason))
+   {
+      if (ShowDebug) Print("[FILTRAS] ", blockReason);
+      return;
+   }
 
-   // Analizuojame rinką
-   int signal = GetSignal();
-   if (signal == 0) return;
+   int signal = 0;
+   int score  = 0;
+   string debugInfo = "";
+   GetSignal(signal, score, debugInfo);
 
-   // Atidarome sandorį
-   OpenTrade(signal);
+   if (ShowDebug)
+      Print("[SIGNALAS] Balai: ", score, "/5 | ", debugInfo);
+
+   if (signal != 0 && score >= MinScoreRequired)
+      OpenTrade(signal, score);
 }
 
 //+------------------------------------------------------------------+
-//| Sesijų filtras                                                   |
+//| Signalo skaičiavimas su balų sistema                            |
 //+------------------------------------------------------------------+
-bool IsInSession()
+void GetSignal(int &signal, int &score, string &info)
 {
-   if (!UseSessionFilter) return true;
-   int hour = TimeHour(TimeGMT());
-   bool london = (hour >= London_Start && hour < London_End);
-   bool ny     = (hour >= NY_Start     && hour < NY_End);
-   return (london || ny);
+   signal = 0;
+   score  = 0;
+   info   = "";
+
+   double ema_fast = iMA(NULL, 0, EMA_Fast, 0, MODE_EMA, PRICE_CLOSE, 1);
+   double ema_slow = iMA(NULL, 0, EMA_Slow, 0, MODE_EMA, PRICE_CLOSE, 1);
+   double rsi      = iRSI(NULL, 0, RSI_Period, PRICE_CLOSE, 1);
+   double adx      = iADX(NULL, 0, 14, PRICE_CLOSE, MODE_MAIN, 1);
+   double atr      = iATR(NULL, 0, ATR_Period, 1);
+
+   bool bull_trend = (ema_fast > ema_slow);
+   bool bear_trend = (ema_fast < ema_slow);
+   bool trending   = (adx > 18);
+
+   // === 1. TENDENCIJA (EMA) — privaloma ===
+   int trendDir = 0;
+   if (bull_trend) { trendDir =  1; score++; info += "EMA↑ "; }
+   if (bear_trend) { trendDir = -1; score++; info += "EMA↓ "; }
+
+   if (trendDir == 0) return;
+
+   // === 2. ADX — tendencija stipri ===
+   if (trending) { score++; info += "ADX✓ "; }
+   else info += "ADX✗ ";
+
+   // === 3. RSI filtras (atsipalaidavęs) ===
+   if (trendDir == 1 && rsi < 60) { score++; info += "RSI✓ "; }
+   else if (trendDir == -1 && rsi > 40) { score++; info += "RSI✓ "; }
+   else info += "RSI✗ ";
+
+   // === 4. BOS arba CRT ===
+   bool bos = false;
+   bool crt = false;
+
+   if (trendDir == 1)
+   {
+      bos = IsBullishBOS(15);
+      crt = UseCRT ? IsBullishCRT() : false;
+   }
+   else
+   {
+      bos = IsBearishBOS(15);
+      crt = UseCRT ? IsBearishCRT() : false;
+   }
+
+   if (bos || crt)
+   {
+      score++;
+      info += (bos ? "BOS✓ " : "CRT✓ ");
+   }
+   else info += "BOS/CRT✗ ";
+
+   // === 5. Order Block arba kaina virš/žemiau EMA50 ===
+   bool ob = false;
+   if (trendDir == 1) ob = IsBullishOB();
+   else               ob = IsBearishOB();
+
+   // Papildoma sąlyga: kaina tarp EMA50 ir EMA200 (pullback zona)
+   double price     = Close[1];
+   bool pullback_zone = false;
+   if (trendDir == 1) pullback_zone = (price > ema_slow && price < ema_fast * 1.002);
+   else               pullback_zone = (price < ema_slow && price > ema_fast * 0.998);
+
+   if (ob || pullback_zone)
+   {
+      score++;
+      info += (ob ? "OB✓ " : "PB✓ ");
+   }
+   else info += "OB/PB✗ ";
+
+   // Galutinis sprendimas
+   if (score >= MinScoreRequired)
+      signal = trendDir;
 }
 
 //+------------------------------------------------------------------+
-//| Visi filtrai                                                     |
+//| CRT — Bullish (kaina nušlavė ankstesnės žvakės žemumą)         |
 //+------------------------------------------------------------------+
-bool PassFilters()
+bool IsBullishCRT()
 {
-   // Sesijų filtras
-   if (!IsInSession())
-   {
-      return false;
-   }
-
-   // Pralaimėjimų serijos filtras
-   if (g_LossStreak >= MaxLossStreak)
-   {
-      Print("Pauzė: ", g_LossStreak, " pralaimėjimai iš eilės");
-      return false;
-   }
-
-   // Dienos nuostolių limitas
-   double dayLoss = (g_DayStartBalance - AccountBalance()) / g_DayStartBalance * 100;
-   if (dayLoss >= MaxDailyLossPct)
-   {
-      Print("Dienos nuostolių limitas pasiektas: -", dayLoss, "%");
-      return false;
-   }
-
-   return true;
+   // Ankstesnės žvakės žemumas nušluotas, bet kaina užsidarė aukščiau
+   double prev_low  = Low[2];
+   double prev_mid  = (High[2] + Low[2]) / 2.0;
+   bool   swept_low = (Low[1] < prev_low);
+   bool   closed_up = (Close[1] > prev_mid);
+   return (swept_low && closed_up);
 }
 
 //+------------------------------------------------------------------+
-//| Pagrindinis signalo generatorius                                 |
+//| CRT — Bearish (kaina nušlavė ankstesnės žvakės aukštumą)       |
 //+------------------------------------------------------------------+
-int GetSignal()
+bool IsBearishCRT()
 {
-   // Indikatoriai
-   double ema_fast_curr = iMA(NULL, 0, EMA_Fast, 0, MODE_EMA, PRICE_CLOSE, 1);
-   double ema_fast_prev = iMA(NULL, 0, EMA_Fast, 0, MODE_EMA, PRICE_CLOSE, 2);
-   double ema_slow_curr = iMA(NULL, 0, EMA_Slow, 0, MODE_EMA, PRICE_CLOSE, 1);
-   double rsi           = iRSI(NULL, 0, RSI_Period, PRICE_CLOSE, 1);
-   double atr           = iATR(NULL, 0, 14, 1);
-
-   // Tendencija
-   bool bull_trend = (ema_fast_curr > ema_slow_curr);
-   bool bear_trend = (ema_fast_curr < ema_slow_curr);
-
-   // Market Regime Detection (ADX)
-   double adx = iADX(NULL, 0, 14, PRICE_CLOSE, MODE_MAIN, 1);
-   bool trending = (adx > 20);
-
-   // BOS (Break of Structure)
-   bool bos_bull = IsBullishBOS();
-   bool bos_bear = IsBearishBOS();
-
-   // Order Block
-   bool ob_bull = IsBullishOB();
-   bool ob_bear = IsBearishOB();
-
-   // BUY sąlygos
-   if (bull_trend && trending && bos_bull && ob_bull && rsi < RSI_Buy_Max)
-   {
-      Print("BUY signalas: EMA=", ema_fast_curr, " RSI=", rsi, " ADX=", adx);
-      return 1;
-   }
-
-   // SELL sąlygos
-   if (bear_trend && trending && bos_bear && ob_bear && rsi > RSI_Sell_Min)
-   {
-      Print("SELL signalas: EMA=", ema_fast_curr, " RSI=", rsi, " ADX=", adx);
-      return -1;
-   }
-
-   return 0;
+   double prev_high = High[2];
+   double prev_mid  = (High[2] + Low[2]) / 2.0;
+   bool   swept_high = (High[1] > prev_high);
+   bool   closed_dn  = (Close[1] < prev_mid);
+   return (swept_high && closed_dn);
 }
 
 //+------------------------------------------------------------------+
-//| Bullish BOS patikrinimas                                         |
-//+------------------------------------------------------------------+
-bool IsBullishBOS()
+bool IsBullishBOS(int window = 20)
 {
    double maxHigh = 0;
-   for (int i = 2; i <= BOS_Window + 1; i++)
+   for (int i = 2; i <= window; i++)
       maxHigh = MathMax(maxHigh, High[i]);
    return (High[1] > maxHigh);
 }
 
-//+------------------------------------------------------------------+
-//| Bearish BOS patikrinimas                                         |
-//+------------------------------------------------------------------+
-bool IsBearishBOS()
+bool IsBearishBOS(int window = 20)
 {
    double minLow = DBL_MAX;
-   for (int i = 2; i <= BOS_Window + 1; i++)
+   for (int i = 2; i <= window; i++)
       minLow = MathMin(minLow, Low[i]);
    return (Low[1] < minLow);
 }
 
-//+------------------------------------------------------------------+
-//| Bullish Order Block                                              |
-//+------------------------------------------------------------------+
 bool IsBullishOB()
 {
-   for (int i = 2; i <= OB_Lookback + 1; i++)
+   for (int i = 3; i <= 15; i++)
    {
-      bool bearish_candle = (Close[i] < Open[i]);
-      bool next_bullish   = (Close[i-1] > High[i]);
-      if (bearish_candle && next_bullish)
+      if (Close[i] < Open[i] && Close[i-1] > High[i])
       {
-         double ob_high = High[i];
-         double ob_low  = Low[i];
-         return (Close[1] >= ob_low && Close[1] <= ob_high * 1.001);
+         double zone_high = High[i] * 1.002;
+         double zone_low  = Low[i]  * 0.998;
+         if (Close[1] >= zone_low && Close[1] <= zone_high)
+            return true;
       }
    }
    return false;
 }
 
-//+------------------------------------------------------------------+
-//| Bearish Order Block                                              |
-//+------------------------------------------------------------------+
 bool IsBearishOB()
 {
-   for (int i = 2; i <= OB_Lookback + 1; i++)
+   for (int i = 3; i <= 15; i++)
    {
-      bool bullish_candle = (Close[i] > Open[i]);
-      bool next_bearish   = (Close[i-1] < Low[i]);
-      if (bullish_candle && next_bearish)
+      if (Close[i] > Open[i] && Close[i-1] < Low[i])
       {
-         double ob_high = High[i];
-         double ob_low  = Low[i];
-         return (Close[1] <= ob_high && Close[1] >= ob_low * 0.999);
+         double zone_high = High[i] * 1.002;
+         double zone_low  = Low[i]  * 0.998;
+         if (Close[1] <= zone_high && Close[1] >= zone_low)
+            return true;
       }
    }
    return false;
 }
 
 //+------------------------------------------------------------------+
-//| Loto dydžio skaičiavimas                                        |
-//+------------------------------------------------------------------+
-double CalcLotSize(double sl_points)
+bool PassFilters(string &reason)
 {
-   double balance   = AccountBalance();
+   if (UseSessionFilter)
+   {
+      int hour   = TimeHour(TimeGMT());
+      bool lon   = (hour >= London_Start && hour < London_End);
+      bool ny    = (hour >= NY_Start     && hour < NY_End);
+      if (!lon && !ny)
+      {
+         reason = "Ne sesijos laikas (GMT " + IntegerToString(hour) + ":xx)";
+         return false;
+      }
+   }
 
-   // Anti-martingale: mažesnis lotas po pralaimėjimų
-   double riskPct = RiskPercent / 100.0;
-   if (g_LossStreak == 1) riskPct *= 0.75;
-   if (g_LossStreak == 2) riskPct *= 0.50;
+   if (g_LossStreak >= MaxLossStreak)
+   {
+      reason = "Pauzė po " + IntegerToString(g_LossStreak) + " pralaimėjimų";
+      return false;
+   }
 
-   double riskAmt   = balance * riskPct;
-   double tickVal   = MarketInfo(Symbol(), MODE_TICKVALUE);
-   double tickSize  = MarketInfo(Symbol(), MODE_TICKSIZE);
-   double lotStep   = MarketInfo(Symbol(), MODE_LOTSTEP);
-   double minLot    = MarketInfo(Symbol(), MODE_MINLOT);
-   double maxLot    = MarketInfo(Symbol(), MODE_MAXLOT);
-
-   if (tickVal <= 0 || tickSize <= 0 || sl_points <= 0) return minLot;
-
-   double lot = riskAmt / (sl_points / tickSize * tickVal);
-   lot = MathFloor(lot / lotStep) * lotStep;
-   lot = MathMax(minLot, MathMin(maxLot, lot));
-
-   return lot;
+   if (g_DayStartBalance > 0)
+   {
+      double loss = (g_DayStartBalance - AccountBalance()) / g_DayStartBalance * 100;
+      if (loss >= MaxDailyLossPct)
+      {
+         reason = "Dienos limitas -" + DoubleToString(loss, 1) + "%";
+         return false;
+      }
+   }
+   return true;
 }
 
 //+------------------------------------------------------------------+
-//| Sandorio atidarymas                                              |
-//+------------------------------------------------------------------+
-void OpenTrade(int signal)
+void OpenTrade(int signal, int score)
 {
-   double atr     = iATR(NULL, 0, 14, 1);
-   double spread  = MarketInfo(Symbol(), MODE_SPREAD) * Point;
-   double sl_dist = atr * 1.2;
+   double atr     = iATR(NULL, 0, ATR_Period, 1);
+   double sl_dist = atr * 1.5;
 
-   double price, sl, tp1, tp2;
+   double price = (signal == 1) ? Ask : Bid;
+   double sl    = (signal == 1) ? price - sl_dist : price + sl_dist;
+   double tp1   = (signal == 1) ? price + sl_dist * RR_TP1 : price - sl_dist * RR_TP1;
+   double tp2   = (signal == 1) ? price + sl_dist * RR_TP2 : price - sl_dist * RR_TP2;
 
-   if (signal == 1) // BUY
-   {
-      price = Ask;
-      sl    = price - sl_dist;
-      tp1   = price + sl_dist * RR_TP1;
-      tp2   = price + sl_dist * RR_TP2;
-   }
-   else // SELL
-   {
-      price = Bid;
-      sl    = price + sl_dist;
-      tp1   = price - sl_dist * RR_TP1;
-      tp2   = price - sl_dist * RR_TP2;
-   }
-
-   // Normalizuojame kainas
    sl  = NormalizeDouble(sl,  Digits);
    tp1 = NormalizeDouble(tp1, Digits);
    tp2 = NormalizeDouble(tp2, Digits);
 
-   double lot = CalcLotSize(MathAbs(price - sl) / Point);
+   double riskPct = RiskPercent / 100.0;
+   if (g_LossStreak == 1) riskPct *= 0.75;
+   if (g_LossStreak == 2) riskPct *= 0.50;
 
-   int type   = (signal == 1) ? OP_BUY : OP_SELL;
+   double riskAmt  = AccountBalance() * riskPct;
+   double tickVal  = MarketInfo(Symbol(), MODE_TICKVALUE);
+   double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
+   double lotStep  = MarketInfo(Symbol(), MODE_LOTSTEP);
+   double minLot   = MarketInfo(Symbol(), MODE_MINLOT);
+   double maxLot   = MarketInfo(Symbol(), MODE_MAXLOT);
+
+   double lot = 0.01;
+   if (tickVal > 0 && tickSize > 0 && sl_dist > 0)
+   {
+      lot = riskAmt / (sl_dist / tickSize * tickVal);
+      lot = MathFloor(lot / lotStep) * lotStep;
+      lot = MathMax(minLot, MathMin(maxLot, lot));
+   }
+
+   int type  = (signal == 1) ? OP_BUY : OP_SELL;
    string dir = (signal == 1) ? "BUY" : "SELL";
 
-   // Pirmasis sandoris: 50% loto, TP1
-   double lot1 = NormalizeDouble(lot * 0.5, 2);
-   double lot2 = NormalizeDouble(lot * 0.5, 2);
-   if (lot1 < MarketInfo(Symbol(), MODE_MINLOT))
-      lot1 = MarketInfo(Symbol(), MODE_MINLOT);
-   if (lot2 < MarketInfo(Symbol(), MODE_MINLOT))
-      lot2 = MarketInfo(Symbol(), MODE_MINLOT);
+   double lot1 = MathMax(minLot, NormalizeDouble(lot * 0.5, 2));
+   double lot2 = MathMax(minLot, NormalizeDouble(lot * 0.5, 2));
 
-   int ticket1 = OrderSend(Symbol(), type, lot1, price, 3, sl, tp1,
-                            EA_Comment + "_TP1", MagicNumber, 0,
-                            signal == 1 ? clrGreen : clrRed);
+   int t1 = OrderSend(Symbol(), type, lot1, price, 5, sl, tp1,
+                      EA_Comment + "_TP1", MagicNumber, 0,
+                      signal == 1 ? clrGreen : clrRed);
+   int t2 = OrderSend(Symbol(), type, lot2, price, 5, sl, tp2,
+                      EA_Comment + "_TP2", MagicNumber, 0,
+                      signal == 1 ? clrLime  : clrOrangeRed);
 
-   int ticket2 = OrderSend(Symbol(), type, lot2, price, 3, sl, tp2,
-                            EA_Comment + "_TP2", MagicNumber, 0,
-                            signal == 1 ? clrLime : clrOrangeRed);
-
-   if (ticket1 > 0 && ticket2 > 0)
-      Print(dir, " atidarytas. SL=", sl, " TP1=", tp1, " TP2=", tp2, " Lot=", lot);
+   if (t1 > 0)
+      Print("✅ ", dir, " | Balai:", score, "/5 | Lot:", lot,
+            " | SL:", sl, " | TP1:", tp1, " | TP2:", tp2);
    else
-      Print("Klaida atidarant sandorį: ", GetLastError());
+      Print("❌ Klaida: ", GetLastError(), " | Dir:", dir);
 }
 
-//+------------------------------------------------------------------+
-//| Atvirų sandorių valdymas (BE + Trailing)                        |
 //+------------------------------------------------------------------+
 void ManageOpenTrades()
 {
@@ -320,64 +321,55 @@ void ManageOpenTrades()
       if (OrderMagicNumber() != MagicNumber)           continue;
       if (OrderSymbol() != Symbol())                   continue;
 
-      double openPrice = OrderOpenPrice();
-      double sl        = OrderStopLoss();
-      double atr       = iATR(NULL, 0, 14, 1);
+      double op  = OrderOpenPrice();
+      double sl  = OrderStopLoss();
+      double atr = iATR(NULL, 0, ATR_Period, 1);
 
-      // Break-even: kai pelnas = 1x ATR, perkelti SL į įėjimą
       if (OrderType() == OP_BUY)
       {
-         if (Bid > openPrice + atr && sl < openPrice - Point)
+         // Break-even
+         if (Bid >= op + atr && sl < op)
          {
-            double newSL = NormalizeDouble(openPrice + Point * 2, Digits);
-            if (newSL > sl)
-               OrderModify(OrderTicket(), openPrice, newSL, OrderTakeProfit(), 0, clrBlue);
+            double nsl = NormalizeDouble(op + Point * 5, Digits);
+            if (nsl > sl) OrderModify(OrderTicket(), op, nsl, OrderTakeProfit(), 0, clrBlue);
          }
-         // Trailing stop
-         double trailSL = NormalizeDouble(Bid - atr * 1.0, Digits);
-         if (trailSL > sl && trailSL > openPrice)
-            OrderModify(OrderTicket(), openPrice, trailSL, OrderTakeProfit(), 0, clrBlue);
+         // Trailing
+         double tsl = NormalizeDouble(Bid - atr, Digits);
+         if (tsl > sl && tsl > op)
+            OrderModify(OrderTicket(), op, tsl, OrderTakeProfit(), 0, clrBlue);
       }
 
       if (OrderType() == OP_SELL)
       {
-         if (Ask < openPrice - atr && sl > openPrice + Point)
+         if (Ask <= op - atr && sl > op)
          {
-            double newSL = NormalizeDouble(openPrice - Point * 2, Digits);
-            if (newSL < sl)
-               OrderModify(OrderTicket(), openPrice, newSL, OrderTakeProfit(), 0, clrBlue);
+            double nsl = NormalizeDouble(op - Point * 5, Digits);
+            if (nsl < sl) OrderModify(OrderTicket(), op, nsl, OrderTakeProfit(), 0, clrBlue);
          }
-         double trailSL = NormalizeDouble(Ask + atr * 1.0, Digits);
-         if (trailSL < sl && trailSL < openPrice)
-            OrderModify(OrderTicket(), openPrice, trailSL, OrderTakeProfit(), 0, clrBlue);
+         double tsl = NormalizeDouble(Ask + atr, Digits);
+         if (tsl < sl && tsl < op)
+            OrderModify(OrderTicket(), op, tsl, OrderTakeProfit(), 0, clrBlue);
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Pralaimėjimų serijos atnaujinimas                               |
-//+------------------------------------------------------------------+
 void UpdateLossStreak()
 {
-   int losses = 0, wins = 0;
+   int losses = 0;
    for (int i = OrdersHistoryTotal() - 1; i >= 0; i--)
    {
       if (!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
       if (OrderMagicNumber() != MagicNumber)            continue;
       if (OrderSymbol() != Symbol())                    continue;
       if (OrderType() > OP_SELL)                        continue;
-
-      if (OrderProfit() < 0) { losses++; wins = 0; }
-      else                   { wins++;   break;     }
-
-      if (wins > 0 || losses > 5) break;
+      if (OrderProfit() >= 0) break;
+      losses++;
+      if (losses >= MaxLossStreak) break;
    }
    g_LossStreak = losses;
 }
 
-//+------------------------------------------------------------------+
-//| Dienos balanso atstatymas                                       |
-//+------------------------------------------------------------------+
 void ResetDailyBalance()
 {
    datetime today = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
@@ -386,30 +378,24 @@ void ResetDailyBalance()
       g_DayStartBalance = AccountBalance();
       g_LastTradeDay    = today;
       g_LossStreak      = 0;
-      Print("Nauja diena. Balansas: ", g_DayStartBalance);
+      if (ShowDebug)
+         Print("=== Nauja diena | Balansas: $", g_DayStartBalance, " ===");
    }
 }
 
-//+------------------------------------------------------------------+
-//| Atvirų sandorių skaičiavimas                                    |
-//+------------------------------------------------------------------+
 int CountOpenTrades()
 {
-   int count = 0;
+   int n = 0;
    for (int i = 0; i < OrdersTotal(); i++)
    {
       if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-      if (OrderMagicNumber() == MagicNumber && OrderSymbol() == Symbol())
-         count++;
+      if (OrderMagicNumber() == MagicNumber && OrderSymbol() == Symbol()) n++;
    }
-   return count;
+   return n;
 }
 
-//+------------------------------------------------------------------+
-//| Deaktyvacija                                                     |
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("SMC Sniper EA sustabdytas.");
+   Print("SMC Sniper v2.0 sustabdytas.");
 }
 //+------------------------------------------------------------------+
