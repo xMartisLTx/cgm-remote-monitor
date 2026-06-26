@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("SMC Sniper v2.0 — Signals", overlay=true, max_bars_back=500)
 
 // ─── PARAMETRAI ───────────────────────────────────────────────
