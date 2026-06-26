@@ -22,10 +22,15 @@ input bool   ShowDebug        = true;  // Debug žurnalas
 input int    MagicNumber      = 20250101;
 input string EA_Comment       = "EMA200_Cross";
 
+//--- Papildomi parametrai
+input double ProfitLockEUR    = 50.0;  // Uždaryti jei pelnas nukrenta žemiau X EUR
+input double TrailingATR      = 1.5;   // Trailing SL atstumas (ATR kartotinis)
+
 //--- Globalūs
 double   g_DayStartBalance = 0;
 datetime g_LastTradeDay    = 0;
 datetime g_LastBarTime     = 0;
+double   g_MaxProfit       = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -44,6 +49,7 @@ void OnTick()
    g_LastBarTime = Time[0];
 
    ResetDailyBalance();
+   ManageOpenTrades();
 
    // Jei jau yra atviras sandoris — nedarom naujo
    if (CountOpenTrades() > 0) return;
@@ -136,6 +142,74 @@ void OpenTrade(int signal)
    else
       Print("❌ Klaida ", GetLastError(), " | ", dir,
             " | Price:", price, " | SL:", sl, " | TP:", tp);
+}
+
+//+------------------------------------------------------------------+
+//| Tvarko atvirus sandorius: trailing stop + pelno apsauga         |
+//+------------------------------------------------------------------+
+void ManageOpenTrades()
+{
+   bool hasOpen = false;
+
+   for (int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if (OrderMagicNumber() != MagicNumber)           continue;
+      if (OrderSymbol() != Symbol())                   continue;
+
+      hasOpen = true;
+      double profit = OrderProfit() + OrderSwap() + OrderCommission();
+      double op     = OrderOpenPrice();
+      double sl     = OrderStopLoss();
+      double atr    = iATR(NULL, 0, ATR_Period, 1);
+
+      // Atnaujinti maksimalų pelną
+      if (profit > g_MaxProfit)
+         g_MaxProfit = profit;
+
+      // ─── PELNO APSAUGA ─────────────────────────────────────────
+      // Jei pelnas buvo virš ProfitLockEUR ir nukrito žemiau — uždaryti
+      if (g_MaxProfit >= ProfitLockEUR && profit < ProfitLockEUR)
+      {
+         double closePrice = (OrderType() == OP_BUY) ? Bid : Ask;
+         if (OrderClose(OrderTicket(), OrderLots(), closePrice, 5, clrBlue))
+         {
+            Print("💰 Pelno apsauga! Uždarytas | Maks.pelnas: ",
+                  DoubleToString(g_MaxProfit, 2), "€ | Dabartinis: ",
+                  DoubleToString(profit, 2), "€");
+            g_MaxProfit = 0;
+         }
+         continue;
+      }
+
+      // ─── TRAILING STOP ─────────────────────────────────────────
+      if (OrderType() == OP_BUY)
+      {
+         double newSL = NormalizeDouble(Bid - atr * TrailingATR, Digits);
+         // Kelti SL tik aukštyn, tik virš atvėrimo kainos
+         if (newSL > sl && newSL > op)
+         {
+            OrderModify(OrderTicket(), op, newSL, OrderTakeProfit(), 0, clrBlue);
+            if (ShowDebug)
+               Print("[TRAILING] BUY SL pakeltas į ", DoubleToString(newSL, Digits));
+         }
+      }
+      else if (OrderType() == OP_SELL)
+      {
+         double newSL = NormalizeDouble(Ask + atr * TrailingATR, Digits);
+         // Leisti SL tik žemyn, tik žemiau atvėrimo kainos
+         if ((sl == 0 || newSL < sl) && newSL < op)
+         {
+            OrderModify(OrderTicket(), op, newSL, OrderTakeProfit(), 0, clrBlue);
+            if (ShowDebug)
+               Print("[TRAILING] SELL SL nuleistas į ", DoubleToString(newSL, Digits));
+         }
+      }
+   }
+
+   // Nustatyti maks. pelną kai nėra atvirų sandorių
+   if (!hasOpen)
+      g_MaxProfit = 0;
 }
 
 //+------------------------------------------------------------------+
