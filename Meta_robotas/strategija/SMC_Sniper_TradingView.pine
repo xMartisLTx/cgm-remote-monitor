@@ -1,14 +1,15 @@
 //@version=6
-indicator("SMC Sniper v2.0", overlay = true, max_bars_back = 500)
+indicator("SMC Sniper v3.0", overlay = true, max_bars_back = 500)
 
 // ─── PARAMETRAI ───────────────────────────────────────────────
-emaFastLen = input.int(50,  "EMA 50",  group = "Indikatoriai")
-emaSlowLen = input.int(200, "EMA 200", group = "Indikatoriai")
-rsiLen     = input.int(14,  "RSI",     group = "Indikatoriai")
-atrLen     = input.int(14,  "ATR",     group = "Indikatoriai")
-adxLen     = input.int(14,  "ADX",     group = "Indikatoriai")
-minScore   = input.int(3,   "Min. balai (iš 5)", minval = 1, maxval = 5, group = "Signalai")
-bosWindow  = input.int(15,  "BOS langas",         group = "Signalai")
+emaFastLen = input.int(50,  "EMA 50",  group = "EMA")
+emaSlowLen = input.int(200, "EMA 200", group = "EMA")
+rsiLen     = input.int(14,  "RSI",     group = "Filtrai")
+rsiOB      = input.int(60,  "RSI Overbought", group = "Filtrai")
+rsiOS      = input.int(40,  "RSI Oversold",   group = "Filtrai")
+atrLen     = input.int(14,  "ATR",     group = "Filtrai")
+swingLen   = input.int(30,  "Swing aukštumos/žemumos langas", group = "Filtrai")
+coolBars   = input.int(20,  "Min. barų tarp signalų", group = "Filtrai")
 rrTp1      = input.float(2.0, "TP1 RR", group = "SL/TP")
 rrTp2      = input.float(3.0, "TP2 RR", group = "SL/TP")
 
@@ -17,150 +18,116 @@ emaFast = ta.ema(close, emaFastLen)
 emaSlow = ta.ema(close, emaSlowLen)
 rsi     = ta.rsi(close, rsiLen)
 atr     = ta.atr(atrLen)
-adx     = ta.rma(math.abs(ta.change(ta.rma(high - low, adxLen))), adxLen)
 
-// ─── EMA LINIJOS ──────────────────────────────────────────────
-plot(emaFast, "EMA 50",  color = color.new(color.yellow, 0), linewidth = 2)
-plot(emaSlow, "EMA 200", color = color.new(color.white,  0), linewidth = 2)
+plot(emaFast, "EMA 50",  color = color.yellow, linewidth = 2)
+plot(emaSlow, "EMA 200", color = color.white,  linewidth = 2)
 
 // ─── TENDENCIJA ───────────────────────────────────────────────
 bullTrend = emaFast > emaSlow
 bearTrend = emaFast < emaSlow
 
-// ─── BOS ──────────────────────────────────────────────────────
-prevHigh = ta.highest(high, bosWindow)[1]
-prevLow  = ta.lowest(low,   bosWindow)[1]
-bosBull  = high > prevHigh
-bosBear  = low  < prevLow
+// ─── SWING AUKŠTUMOS IR ŽEMUMOS (rimtas BOS) ─────────────────
+swingHigh = ta.highest(high, swingLen)
+swingLow  = ta.lowest(low,   swingLen)
 
-plotshape(bosBull, "BOS ↑", shape.triangleup,
-     location.belowbar, color.new(color.aqua, 30), size = size.tiny, text = "BOS")
-plotshape(bosBear, "BOS ↓", shape.triangledown,
-     location.abovebar, color.new(color.orange, 30), size = size.tiny, text = "BOS")
+// BOS tik kai kaina perlaužia ILGALAIKĮ swing aukštumą/žemumą
+bosBull = high[1] > swingHigh[2] and bullTrend
+bosBear = low[1]  < swingLow[2]  and bearTrend
 
-// ─── CRT ──────────────────────────────────────────────────────
-prevMid  = (high[1] + low[1]) / 2.0
-crtBull  = low  < low[1]  and close > prevMid
-crtBear  = high > high[1] and close < prevMid
+// ─── CRT — tik su patvirtinimu ────────────────────────────────
+prevCandleRange = high[1] - low[1]
+bigCandle = prevCandleRange > atr * 1.2
 
-plotshape(crtBull, "CRT ↑", shape.circle,
-     location.belowbar, color.new(color.lime, 20), size = size.tiny, text = "CRT")
-plotshape(crtBear, "CRT ↓", shape.circle,
-     location.abovebar, color.new(color.red,  20), size = size.tiny, text = "CRT")
+crtBull = low < low[1] and close > (high[1] + low[1]) / 2 and bigCandle and bullTrend
+crtBear = high > high[1] and close < (high[1] + low[1]) / 2 and bigCandle and bearTrend
 
-// ─── ORDER BLOCK ──────────────────────────────────────────────
-var float obBullHigh = na
-var float obBullLow  = na
-var float obBearHigh = na
-var float obBearLow  = na
+// ─── PULLBACK PRIE EMA50 ──────────────────────────────────────
+nearEmaFast = math.abs(close - emaFast) < atr * 0.5
+pullbackBull = bullTrend and nearEmaFast and close > emaSlow
+pullbackBear = bearTrend and nearEmaFast and close < emaSlow
 
-if close[1] < open[1] and close > high[1]
-    obBullHigh := high[1]
-    obBullLow  := low[1]
+// ─── RSI FILTRAS ──────────────────────────────────────────────
+rsiBull = rsi < rsiOB and rsi > 30
+rsiBear = rsi > rsiOS and rsi < 70
 
-if close[1] > open[1] and close < low[1]
-    obBearHigh := high[1]
-    obBearLow  := low[1]
+// ─── COOLDOWN ─────────────────────────────────────────────────
+var int lastBar = 0
+enoughBars = (bar_index - lastBar) >= coolBars
 
-inBullOB = not na(obBullHigh) and close >= obBullLow  and close <= obBullHigh
-inBearOB = not na(obBearHigh) and close <= obBearHigh and close >= obBearLow
+// ─── GALUTINIS SIGNALAS ───────────────────────────────────────
+// BUY: tendencija + pullback prie EMA50 + RSI + (BOS arba CRT)
+buyCondition  = bullTrend and pullbackBull and rsiBull and (bosBull or crtBull) and enoughBars
+sellCondition = bearTrend and pullbackBear and rsiBear and (bosBear or crtBear) and enoughBars
 
-bgcolor(inBullOB ? color.new(color.green, 88) : na)
-bgcolor(inBearOB ? color.new(color.red,   88) : na)
+// Tik pirmame bare
+buySignal  = buyCondition  and not buyCondition[1]
+sellSignal = sellCondition and not sellCondition[1]
 
-// ─── BALŲ SISTEMA ─────────────────────────────────────────────
-// BOS arba CRT privalomas
-hasTriggerBull = bosBull or crtBull
-hasTriggerBear = bosBear or crtBear
+if buySignal or sellSignal
+    lastBar := bar_index
 
-bullScore = 0
-bullScore += bullTrend        ? 1 : 0
-bullScore += rsi < 55         ? 1 : 0
-bullScore += hasTriggerBull   ? 1 : 0
-bullScore += inBullOB         ? 1 : 0
-bullScore += close > emaSlow  ? 1 : 0
-
-bearScore = 0
-bearScore += bearTrend        ? 1 : 0
-bearScore += rsi > 45         ? 1 : 0
-bearScore += hasTriggerBear   ? 1 : 0
-bearScore += inBearOB         ? 1 : 0
-bearScore += close < emaSlow  ? 1 : 0
-
-// ─── SIGNALAI — cooldown 10 barų tarp signalų ────────────────
-var int lastSignalBar = 0
-cooldown = 10
-
-buyRaw  = bullTrend and hasTriggerBull and bullScore >= minScore
-sellRaw = bearTrend and hasTriggerBear and bearScore >= minScore
-
-newBuy  = buyRaw  and not buyRaw[1]  and (bar_index - lastSignalBar) >= cooldown
-newSell = sellRaw and not sellRaw[1] and (bar_index - lastSignalBar) >= cooldown
-
-if newBuy or newSell
-    lastSignalBar := bar_index
-
-buySignal  = newBuy
-sellSignal = newSell
-
+// ─── SIGNALŲ RODYMAS ──────────────────────────────────────────
 plotshape(buySignal,  "BUY",  shape.labelup,
-     location.belowbar, color.new(color.green, 0),
-     size = size.large, text = "BUY",  textcolor = color.white)
+     location.belowbar, color.green,
+     size = size.large, text = "BUY", textcolor = color.white)
 plotshape(sellSignal, "SELL", shape.labeldown,
-     location.abovebar, color.new(color.red, 0),
+     location.abovebar, color.red,
      size = size.large, text = "SELL", textcolor = color.white)
 
-// ─── SL / TP ──────────────────────────────────────────────────
+// ─── BOS ŽENKLIUKAI (maži, informatyvūs) ─────────────────────
+plotshape(bosBull and not bosBull[1], "BOS↑", shape.triangleup,
+     location.belowbar, color.new(color.aqua, 40), size = size.tiny, text = "BOS")
+plotshape(bosBear and not bosBear[1], "BOS↓", shape.triangledown,
+     location.abovebar, color.new(color.orange, 40), size = size.tiny, text = "BOS")
+
+// ─── SL / TP LINIJOS ──────────────────────────────────────────
 slDist = atr * 1.5
 
 if buySignal
-    line.new(bar_index, close - slDist,        bar_index + 20, close - slDist,
+    line.new(bar_index, close - slDist,         bar_index + 25, close - slDist,
          color = color.red,   width = 2, style = line.style_dashed)
-    line.new(bar_index, close + slDist * rrTp1, bar_index + 20, close + slDist * rrTp1,
+    line.new(bar_index, close + slDist * rrTp1, bar_index + 25, close + slDist * rrTp1,
          color = color.lime,  width = 2, style = line.style_dashed)
-    line.new(bar_index, close + slDist * rrTp2, bar_index + 20, close + slDist * rrTp2,
+    line.new(bar_index, close + slDist * rrTp2, bar_index + 25, close + slDist * rrTp2,
          color = color.green, width = 1, style = line.style_dotted)
 
 if sellSignal
-    line.new(bar_index, close + slDist,        bar_index + 20, close + slDist,
+    line.new(bar_index, close + slDist,         bar_index + 25, close + slDist,
          color = color.red,   width = 2, style = line.style_dashed)
-    line.new(bar_index, close - slDist * rrTp1, bar_index + 20, close - slDist * rrTp1,
+    line.new(bar_index, close - slDist * rrTp1, bar_index + 25, close - slDist * rrTp1,
          color = color.lime,  width = 2, style = line.style_dashed)
-    line.new(bar_index, close - slDist * rrTp2, bar_index + 20, close - slDist * rrTp2,
+    line.new(bar_index, close - slDist * rrTp2, bar_index + 25, close - slDist * rrTp2,
          color = color.green, width = 1, style = line.style_dotted)
 
 // ─── INFO LENTELĖ ─────────────────────────────────────────────
-var table t = table.new(position.top_right, 2, 7,
+var table t = table.new(position.top_right, 2, 6,
      bgcolor = color.new(color.black, 15), border_width = 1)
 
 if barstate.islast
-    currentScore = bullTrend ? bullScore : bearScore
     sigText  = buySignal ? "BUY ✅" : sellSignal ? "SELL ✅" : "LAUKTI ⏳"
-    sigColor = buySignal ? color.lime  : sellSignal ? color.red  : color.orange
+    sigColor = buySignal ? color.lime : sellSignal ? color.red : color.orange
+    barsWait = coolBars - (bar_index - lastBar)
+    waitStr  = barsWait > 0 ? str.tostring(barsWait) + " barų" : "Paruošta"
 
-    table.cell(t, 0, 0, "SMC SNIPER",   text_color = color.yellow, text_size = size.normal)
-    table.cell(t, 1, 0, "v2.0",         text_color = color.yellow, text_size = size.normal)
-    table.cell(t, 0, 1, "Tendencija",   text_color = color.white,  text_size = size.small)
+    table.cell(t, 0, 0, "SMC SNIPER v3",  text_color = color.yellow, text_size = size.normal)
+    table.cell(t, 1, 0, "",               text_color = color.yellow, text_size = size.normal)
+    table.cell(t, 0, 1, "Tendencija",     text_color = color.white,  text_size = size.small)
     table.cell(t, 1, 1, bullTrend ? "BULL ↑" : "BEAR ↓",
          text_color = bullTrend ? color.lime : color.red, text_size = size.small)
-    table.cell(t, 0, 2, "RSI",          text_color = color.white,  text_size = size.small)
+    table.cell(t, 0, 2, "RSI",            text_color = color.white,  text_size = size.small)
     table.cell(t, 1, 2, str.tostring(math.round(rsi, 1)),
          text_color = rsi < 40 ? color.lime : rsi > 60 ? color.red : color.gray,
          text_size = size.small)
-    table.cell(t, 0, 3, "BOS",          text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 3, bosBull ? "↑ ✓" : bosBear ? "↓ ✓" : "—",
-         text_color = bosBull ? color.lime : bosBear ? color.red : color.gray,
+    table.cell(t, 0, 3, "Pullback EMA",   text_color = color.white,  text_size = size.small)
+    table.cell(t, 1, 3, (pullbackBull or pullbackBear) ? "✓" : "—",
+         text_color = (pullbackBull or pullbackBear) ? color.lime : color.gray,
          text_size = size.small)
-    table.cell(t, 0, 4, "CRT",          text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 4, crtBull ? "↑ ✓" : crtBear ? "↓ ✓" : "—",
-         text_color = crtBull ? color.lime : crtBear ? color.red : color.gray,
-         text_size = size.small)
-    table.cell(t, 0, 5, "BALAI",        text_color = color.white,  text_size = size.small)
-    table.cell(t, 1, 5, str.tostring(currentScore) + "/5",
-         text_color = color.yellow, text_size = size.small)
-    table.cell(t, 0, 6, "SIGNALAS",     text_color = color.white,  text_size = size.normal)
-    table.cell(t, 1, 6, sigText,        text_color = sigColor,      text_size = size.normal)
+    table.cell(t, 0, 4, "Cooldown",       text_color = color.white,  text_size = size.small)
+    table.cell(t, 1, 4, waitStr,
+         text_color = enoughBars ? color.lime : color.orange, text_size = size.small)
+    table.cell(t, 0, 5, "SIGNALAS",       text_color = color.white,  text_size = size.normal)
+    table.cell(t, 1, 5, sigText,          text_color = sigColor,      text_size = size.normal)
 
 // ─── ALERTAI ──────────────────────────────────────────────────
-alertcondition(buySignal,  "BUY Signalas",  "SMC Sniper: BUY {{ticker}} {{interval}}")
-alertcondition(sellSignal, "SELL Signalas", "SMC Sniper: SELL {{ticker}} {{interval}}")
+alertcondition(buySignal,  "BUY",  "SMC Sniper: BUY {{ticker}} {{interval}}")
+alertcondition(sellSignal, "SELL", "SMC Sniper: SELL {{ticker}} {{interval}}")
