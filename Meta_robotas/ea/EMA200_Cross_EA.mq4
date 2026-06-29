@@ -123,6 +123,22 @@ int CountOpenTrades()
 }
 
 //+------------------------------------------------------------------+
+//| Grąžina atvirų sandorių kryptį: 1=BUY, -1=SELL, 0=nėra        |
+//+------------------------------------------------------------------+
+int GetOpenDirection()
+{
+   for (int i = 0; i < OrdersTotal(); i++)
+   {
+      if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if (OrderMagicNumber() != MagicNumber)           continue;
+      if (OrderSymbol() != Symbol())                   continue;
+      if (OrderType() == OP_BUY)  return  1;
+      if (OrderType() == OP_SELL) return -1;
+   }
+   return 0;
+}
+
+//+------------------------------------------------------------------+
 void OnTick()
 {
    if (Time[0] == g_LastBarTime) return;
@@ -177,8 +193,10 @@ void OnTick()
             " | Balansas: ", DoubleToString(AccountBalance(), 2),
             "€ | Rizika: ", DoubleToString(riskNow, 2), "€");
 
-   if (crossUp)        OpenTrade(1,  riskNow);
-   else if (crossDown) OpenTrade(-1, riskNow);
+   // Neatidaryti priešingos krypties sandorio
+   int openDir = GetOpenDirection();
+   if (crossUp   && openDir != -1) OpenTrade(1,  riskNow);
+   if (crossDown && openDir !=  1) OpenTrade(-1, riskNow);
 }
 
 //+------------------------------------------------------------------+
