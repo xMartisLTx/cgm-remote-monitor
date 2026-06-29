@@ -19,7 +19,8 @@ input int    MaxTrades        = 3;     // Maks. sandorių skaičius vienu metu
 input double SL_LockMin       = 10.0;  // Min. užrakinto pelno EUR naujam sandoriui
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
-input double FixedRiskEUR     = 10.0;  // Fiksuota rizika EUR per sandorį
+input double InvestmentEUR    = 10.0;  // Investicija EUR per sandorį
+input double SL_Percent       = 20.0;  // Nuostolis % nuo investicijos (20% = 2€)
 
 // ─── FILTRAI ──────────────────────────────────────────────────────
 input int    MaxDailyLosses   = 3;     // Maks. nuostolių per dieną šiai porai
@@ -47,7 +48,8 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
-double GetRiskAmount() { return FixedRiskEUR; }
+// Grąžina faktinį nuostolį EUR (InvestmentEUR × SL_Percent / 100)
+double GetRiskAmount() { return InvestmentEUR * SL_Percent / 100.0; }
 
 //+------------------------------------------------------------------+
 //| Suskaičiuoja šiandien uždarytus nuostolingus sandorius šiai porai|
