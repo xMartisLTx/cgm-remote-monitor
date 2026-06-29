@@ -18,15 +18,12 @@ input double TrailingATR      = 1.5;   // Trailing SL atstumas (ATR kartotinis)
 input int    MaxTrades        = 3;     // Maks. sandorių skaičius vienu metu
 input double SL_LockMin       = 10.0;  // Min. užrakinto pelno EUR naujam sandoriui
 
-// ─── COMPOUND RIZIKOS LYGIAI ──────────────────────────────────────
-input double Level2_Balance   = 80.0;  // Nuo 80€  → 20€ rizika
-input double Level3_Balance   = 120.0; // Nuo 120€ → 30€ rizika
-input double Level1_Risk      = 10.0;  // Rizika EUR kai balansas < 80€
-input double Level2_Risk      = 20.0;  // Rizika EUR kai balansas 80-120€
-input double Level3_Risk      = 30.0;  // Rizika EUR kai balansas > 120€
+// ─── RIZIKA ───────────────────────────────────────────────────────
+input double FixedRiskEUR     = 10.0;  // Fiksuota rizika EUR per sandorį
 
 // ─── FILTRAI ──────────────────────────────────────────────────────
 input int    MaxDailyLosses   = 3;     // Maks. nuostolių per dieną šiai porai
+input double MaxDailyLossPct  = 20.0;  // Dienos nuostolių limitas % nuo balanso
 input bool   UseSessionFilter = true;  // Sesijų filtras
 input int    Session_Start    = 7;     // Sesijos pradžia GMT
 input int    Session_End      = 17;    // Sesijos pabaiga GMT
@@ -50,15 +47,7 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
-//| Rizikos suma pagal balansą (auto compound)                       |
-//+------------------------------------------------------------------+
-double GetRiskAmount()
-{
-   double bal = AccountBalance();
-   if (bal >= Level3_Balance) return Level3_Risk;
-   if (bal >= Level2_Balance) return Level2_Risk;
-   return Level1_Risk;
-}
+double GetRiskAmount() { return FixedRiskEUR; }
 
 //+------------------------------------------------------------------+
 //| Suskaičiuoja šiandien uždarytus nuostolingus sandorius šiai porai|
@@ -174,6 +163,19 @@ void OnTick()
          Print("[FILTRAS] ", Symbol(), " šiandien ", dailyLosses,
                " nuostoliai — neprekybaujama likusią dieną");
       return;
+   }
+
+   // ─── 20% DIENOS NUOSTOLIŲ LIMITAS (visoms poroms) ────────────
+   if (g_DayStartBalance > 0)
+   {
+      double loss = (g_DayStartBalance - AccountBalance()) / g_DayStartBalance * 100.0;
+      if (loss >= MaxDailyLossPct)
+      {
+         if (ShowDebug)
+            Print("[FILTRAS] Dienos limitas -", DoubleToString(loss, 1),
+                  "% (riba ", MaxDailyLossPct, "%) — sustabdyta");
+         return;
+      }
    }
 
    // ─── SESIJŲ FILTRAS ───────────────────────────────────────────
