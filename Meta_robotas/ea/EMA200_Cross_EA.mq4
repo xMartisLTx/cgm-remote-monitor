@@ -20,8 +20,6 @@ input double TrailingATR      = 1.5;   // Normalus trailing (ATR kartotinis)
 input double Trailing50pct    = 1.0;   // Trailing kai pelnas >= 50% investicijos
 input double Trailing100pct   = 0.5;   // Trailing kai pelnas >= 100% investicijos
 
-// ─── MULTI-TRADE NUSTATYMAI ───────────────────────────────────────
-input int    MaxTrades        = 3;     // Maks. sandorių skaičius vienu metu
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
 input double StartBalance     = 50.0;  // Pradinis balansas (bazė)
@@ -51,8 +49,8 @@ int OnInit()
 {
    g_DayStartBalance = AccountBalance();
    Print("=== EMA200 Cross EA v5.0 paleistas ===");
-   Print("Pora: ", Symbol(), " | Max sandoriai: ", MaxTrades,
-         " | Max nuostoliai/dieną: ", MaxDailyLosses);
+   Print("Pora: ", Symbol(), " | Portfelio rizika: ", MaxPortfolioRisk,
+         "% | Max nuostoliai/dieną: ", MaxDailyLosses);
    Print("Trailing: normalus ATR×", TrailingATR,
          " | 50% pelno ATR×", Trailing50pct,
          " | 100% pelno ATR×", Trailing100pct);
@@ -187,17 +185,6 @@ bool PortfolioRiskOK()
 }
 
 //+------------------------------------------------------------------+
-int CountOpenTrades()
-{
-   int n = 0;
-   for (int i = 0; i < OrdersTotal(); i++)
-   {
-      if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-      if (OrderMagicNumber() == MagicNumber && OrderSymbol() == Symbol()) n++;
-   }
-   return n;
-}
-
 int GetOpenDirection()
 {
    for (int i = 0; i < OrdersTotal(); i++)
@@ -263,10 +250,9 @@ void OnTick()
    bool crossUp   = (Close[2] < ema2) && (Close[1] > ema1);
    bool crossDown = (Close[2] > ema2) && (Close[1] < ema1);
 
-   int    openDir   = GetOpenDirection();
-   int    openCount = CountOpenTrades();
-   double invest    = GetInvestmentAmount();
-   double riskNow   = invest * SL_Percent / 100.0;
+   int    openDir = GetOpenDirection();
+   double invest  = GetInvestmentAmount();
+   double riskNow = invest * SL_Percent / 100.0;
 
    if (ShowDebug && (crossUp || crossDown))
       Print("[SIGNALAS] ", (crossUp ? "AUKŠTYN" : "ŽEMYN"),
@@ -290,9 +276,8 @@ void OnTick()
       return;
    }
 
-   // ─── PAPILDOMAS SANDORIS TA PAČIA KRYPTIMI ────────────────────
-   if (openCount >= MaxTrades) return;
-   if (!PortfolioRiskOK())     return;
+   // ─── PAPILDOMAS SANDORIS: leidžia tiek kiek tilpa į 20% limitą ─
+   if (!PortfolioRiskOK()) return;
 
    if (crossUp)   OpenTrade(1,  riskNow);
    if (crossDown) OpenTrade(-1, riskNow);
