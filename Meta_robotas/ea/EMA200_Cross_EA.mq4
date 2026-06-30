@@ -18,8 +18,11 @@ input double TrailingATR      = 1.5;   // Trailing SL atstumas (ATR kartotinis)
 input int    MaxTrades        = 3;     // Maks. sandorių skaičius vienu metu
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
-input double InvestmentEUR    = 10.0;  // Investicija EUR per sandorį
-input double SL_Percent       = 20.0;  // SL nuostolis % nuo investicijos (20% = 2€)
+input double StartBalance     = 50.0;  // Pradinis balansas (bazė)
+input double InvestmentBase   = 10.0;  // Pradinė investicija EUR
+input double BalanceStep      = 30.0;  // Kas +30€ balanse → investicija +10€
+input double InvestmentStep   = 10.0;  // Investicijos padidėjimas EUR
+input double SL_Percent       = 20.0;  // SL nuostolis % nuo investicijos (20%=2€)
 input double MaxPortfolioRisk = 20.0;  // Max bendra rizika % nuo balanso
 
 // ─── FILTRAI ──────────────────────────────────────────────────────
@@ -48,8 +51,20 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
-// Grąžina faktinį nuostolį EUR (InvestmentEUR × SL_Percent / 100)
-double GetRiskAmount() { return InvestmentEUR * SL_Percent / 100.0; }
+//| Investicija pagal balansą: kas +30€ balansas → +10€ investicija |
+//+------------------------------------------------------------------+
+double GetInvestmentAmount()
+{
+   double steps = MathFloor((AccountBalance() - StartBalance) / BalanceStep);
+   if (steps < 0) steps = 0;
+   double invest = InvestmentBase + steps * InvestmentStep;
+   if (ShowDebug)
+      Print("[INVEST] Balansas: ", DoubleToString(AccountBalance(), 2),
+            "€ | Investicija: ", DoubleToString(invest, 2), "€");
+   return invest;
+}
+
+double GetRiskAmount() { return GetInvestmentAmount() * SL_Percent / 100.0; }
 
 //+------------------------------------------------------------------+
 //| Suskaičiuoja šiandien uždarytus nuostolingus sandorius šiai porai|
