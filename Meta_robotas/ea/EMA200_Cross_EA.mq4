@@ -16,11 +16,11 @@ input double TrailingATR      = 1.5;   // Trailing SL atstumas (ATR kartotinis)
 
 // ─── MULTI-TRADE NUSTATYMAI ───────────────────────────────────────
 input int    MaxTrades        = 3;     // Maks. sandorių skaičius vienu metu
-input double SL_LockMin       = 10.0;  // Min. užrakinto pelno EUR naujam sandoriui
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
 input double InvestmentEUR    = 10.0;  // Investicija EUR per sandorį
-input double SL_Percent       = 20.0;  // Nuostolis % nuo investicijos (20% = 2€)
+input double SL_Percent       = 20.0;  // SL nuostolis % nuo investicijos (20% = 2€)
+input double MaxPortfolioRisk = 20.0;  // Max bendra rizika % nuo balanso
 
 // ─── FILTRAI ──────────────────────────────────────────────────────
 input int    MaxDailyLosses   = 3;     // Maks. nuostolių per dieną šiai porai
@@ -109,18 +109,62 @@ double GetLockedProfit(int orderIndex)
 }
 
 //+------------------------------------------------------------------+
-//| Bent vienas sandoris užrakintas >= SL_LockMin                   |
+//| Skaičiuoja bendrą riziką EUR — suma visų SL nuostolių          |
+//| Sandoriai su SL virš atvėrimo = 0 rizika (pelnas užrakintas)   |
 //+------------------------------------------------------------------+
-bool AnyTradeSecured()
+double GetTotalRiskAtStake()
 {
+   double total = 0;
    for (int i = 0; i < OrdersTotal(); i++)
    {
       if (!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
       if (OrderMagicNumber() != MagicNumber)           continue;
       if (OrderSymbol() != Symbol())                   continue;
-      if (GetLockedProfit(i) >= SL_LockMin)            return true;
+
+      double op       = OrderOpenPrice();
+      double sl       = OrderStopLoss();
+      double lots     = OrderLots();
+      double tickVal  = MarketInfo(OrderSymbol(), MODE_TICKVALUE);
+      double tickSize = MarketInfo(OrderSymbol(), MODE_TICKSIZE);
+
+      if (sl == 0 || tickVal == 0 || tickSize == 0) continue;
+
+      // Kiek prarastume jei SL paliečiamas (tik jei SL žemiau/virš atvėrimo)
+      double diff = 0;
+      if (OrderType() == OP_BUY  && sl < op) diff = op - sl;
+      if (OrderType() == OP_SELL && sl > op) diff = sl - op;
+
+      if (diff > 0)
+         total += (diff / tickSize) * tickVal * lots;
    }
-   return false;
+   return total;
+}
+
+//+------------------------------------------------------------------+
+//| Tikrina ar galima atidaryti naują sandorį pagal portfelio riziką|
+//+------------------------------------------------------------------+
+bool PortfolioRiskOK()
+{
+   double maxRisk     = AccountBalance() * (MaxPortfolioRisk / 100.0);
+   double currentRisk = GetTotalRiskAtStake();
+   double newRisk     = InvestmentEUR * (SL_Percent / 100.0);
+   double totalIfOpen = currentRisk + newRisk;
+
+   if (ShowDebug)
+      Print("[RIZIKA] Dabartinė: ", DoubleToString(currentRisk, 2),
+            "€ | Naujas sandoris: +", DoubleToString(newRisk, 2),
+            "€ | Iš viso: ", DoubleToString(totalIfOpen, 2),
+            "€ | Limitas: ", DoubleToString(maxRisk, 2), "€");
+
+   if (totalIfOpen > maxRisk)
+   {
+      if (ShowDebug)
+         Print("[BLOKUOTA] Bendra rizika ", DoubleToString(totalIfOpen, 2),
+               "€ viršija limitą ", DoubleToString(maxRisk, 2), "€ (",
+               MaxPortfolioRisk, "% nuo ", DoubleToString(AccountBalance(), 2), "€)");
+      return false;
+   }
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -221,7 +265,7 @@ void OnTick()
 
    // ─── PAPILDOMAS SANDORIS TA PAČIA KRYPTIMI ────────────────────
    if (openCount >= MaxTrades) return;
-   if (openCount > 0 && !AnyTradeSecured()) return;
+   if (!PortfolioRiskOK()) return;
 
    if (ShowDebug)
       Print("[INFO] ", Symbol(), " | Sandoriai: ", openCount, "/", MaxTrades,
