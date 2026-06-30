@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
-//| EMA200 Cross EA v5.0                                             |
+//| EMA200 Cross EA v5.1                                             |
 //| 1. Reversal: kaina kerta atgal → uždaro ir atidaro priešingą   |
 //| 2. Compound: kas +30€ balansas → +10€ investicija              |
 //| 3. Portfolio rizika: SL suma negali viršyti 20% balanso         |
 //| 4. Sesija: tik nauji sandoriai blokuojami; esami valdomi 24/7  |
 //| 5. Dynamic trailing: prie 50%/100% pelno → SL artimesnis       |
 //+------------------------------------------------------------------+
-#property copyright "Forex Signalai v5.0"
-#property version   "5.0"
+#property copyright "Forex Signalai v5.1"
+#property version   "5.1"
 #property strict
 
 // ─── PAGRINDINIAI NUSTATYMAI ──────────────────────────────────────
@@ -19,7 +19,6 @@ input double RR_TP            = 3.0;   // Take-Profit RR (atsarginis)
 input double TrailingATR      = 1.5;   // Normalus trailing (ATR kartotinis)
 input double Trailing50pct    = 1.0;   // Trailing kai pelnas >= 50% investicijos
 input double Trailing100pct   = 0.5;   // Trailing kai pelnas >= 100% investicijos
-
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
 input double StartBalance     = 50.0;  // Pradinis balansas (bazė)
@@ -48,8 +47,8 @@ datetime g_LastBarTime     = 0;
 int OnInit()
 {
    g_DayStartBalance = AccountBalance();
-   Print("=== EMA200 Cross EA v5.0 paleistas ===");
-   Print("Pora: ", Symbol(), " | Portfelio rizika: ", MaxPortfolioRisk,
+   Print("=== EMA200 Cross EA v5.1 paleistas ===");
+   Print("Pora: ", Symbol(), " | Portfolio rizika: ", MaxPortfolioRisk,
          "% | Max nuostoliai/dieną: ", MaxDailyLosses);
    Print("Trailing: normalus ATR×", TrailingATR,
          " | 50% pelno ATR×", Trailing50pct,
@@ -58,7 +57,7 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
-//| Investicija pagal balansą (be debug spausdinimo)                |
+//| Investicija pagal balansą: kas +30€ → +10€                     |
 //+------------------------------------------------------------------+
 double GetInvestmentAmount()
 {
@@ -66,8 +65,6 @@ double GetInvestmentAmount()
    if (steps < 0) steps = 0;
    return InvestmentBase + steps * InvestmentStep;
 }
-
-double GetRiskAmount() { return GetInvestmentAmount() * SL_Percent / 100.0; }
 
 //+------------------------------------------------------------------+
 //| Suskaičiuoja šiandien uždarytus nuostolingus sandorius šiai porai|
@@ -127,8 +124,8 @@ double GetLockedProfit(int orderIndex)
 }
 
 //+------------------------------------------------------------------+
-//| Skaičiuoja bendrą riziką EUR — suma visų SL nuostolių          |
-//| Sandoriai su SL virš atvėrimo = 0 rizika (pelnas užrakintas)   |
+//| Suma visų atvirų SL nuostolių EUR                               |
+//| Sandoriai su SL virš entry = 0 rizika (pelnas užrakintas)      |
 //+------------------------------------------------------------------+
 double GetTotalRiskAtStake()
 {
@@ -160,25 +157,24 @@ double GetTotalRiskAtStake()
 //+------------------------------------------------------------------+
 //| Tikrina ar galima atidaryti naują sandorį pagal portfelio riziką|
 //+------------------------------------------------------------------+
-bool PortfolioRiskOK()
+bool PortfolioRiskOK(double riskAmt)
 {
-   double maxRisk      = AccountBalance() * (MaxPortfolioRisk / 100.0);
-   double currentRisk  = GetTotalRiskAtStake();
-   double newRisk      = GetRiskAmount();
-   double totalIfOpen  = currentRisk + newRisk;
+   double maxRisk     = AccountBalance() * (MaxPortfolioRisk / 100.0);
+   double currentRisk = GetTotalRiskAtStake();
+   double totalIfOpen = currentRisk + riskAmt;
 
    if (ShowDebug)
       Print("[RIZIKA] Dabartinė: ", DoubleToString(currentRisk, 2),
-            "€ | Naujas: +", DoubleToString(newRisk, 2),
+            "€ | Naujas sandoris: +", DoubleToString(riskAmt, 2),
             "€ | Iš viso: ", DoubleToString(totalIfOpen, 2),
             "€ | Limitas: ", DoubleToString(maxRisk, 2), "€");
 
    if (totalIfOpen > maxRisk)
    {
       if (ShowDebug)
-         Print("[BLOKUOTA] Rizika ", DoubleToString(totalIfOpen, 2),
-               "€ > limitas ", DoubleToString(maxRisk, 2), "€ (",
-               MaxPortfolioRisk, "% nuo ", DoubleToString(AccountBalance(), 2), "€)");
+         Print("[BLOKUOTA] ", DoubleToString(totalIfOpen, 2), "€ > ",
+               DoubleToString(maxRisk, 2), "€ (",
+               MaxPortfolioRisk, "% nuo balanso)");
       return false;
    }
    return true;
@@ -213,7 +209,7 @@ void OnTick()
    {
       if (ShowDebug)
          Print("[FILTRAS] ", Symbol(), " šiandien ", dailyLosses,
-               " nuostoliai — nauji sandoriai šiai porai blokuoti");
+               " nuostoliai — nauji sandoriai blokuoti");
       return;
    }
 
@@ -238,7 +234,7 @@ void OnTick()
       {
          if (ShowDebug)
             Print("[FILTRAS] Ne sesijos laikas GMT ", hour,
-                  ":xx — nauji sandoriai blokuoti, esami toliau valdomi");
+                  ":xx — nauji sandoriai blokuoti");
          return;
       }
    }
@@ -250,15 +246,17 @@ void OnTick()
    bool crossUp   = (Close[2] < ema2) && (Close[1] > ema1);
    bool crossDown = (Close[2] > ema2) && (Close[1] < ema1);
 
+   if (!crossUp && !crossDown) return;  // Nėra signalo — nieko nedaryti
+
    int    openDir = GetOpenDirection();
    double invest  = GetInvestmentAmount();
    double riskNow = invest * SL_Percent / 100.0;
 
-   if (ShowDebug && (crossUp || crossDown))
+   if (ShowDebug)
       Print("[SIGNALAS] ", (crossUp ? "AUKŠTYN" : "ŽEMYN"),
             " | Balansas: ", DoubleToString(AccountBalance(), 2),
             "€ | Investicija: ", DoubleToString(invest, 2),
-            "€ | Rizika: ", DoubleToString(riskNow, 2), "€");
+            "€ | Rizika/sandoriui: ", DoubleToString(riskNow, 2), "€");
 
    // ─── REVERSAL: priešinga kryptis → uždaryti ir apsisukti ──────
    if (crossUp && openDir == -1)
@@ -276,8 +274,8 @@ void OnTick()
       return;
    }
 
-   // ─── PAPILDOMAS SANDORIS: leidžia tiek kiek tilpa į 20% limitą ─
-   if (!PortfolioRiskOK()) return;
+   // ─── NAUJAS SANDORIS: tik jei tilpa į 20% portfelio limitą ───
+   if (!PortfolioRiskOK(riskNow)) return;
 
    if (crossUp)   OpenTrade(1,  riskNow);
    if (crossDown) OpenTrade(-1, riskNow);
@@ -309,8 +307,8 @@ void OpenTrade(int signal, double riskAmt)
       lot = MathMax(minLot, MathMin(maxLot, lot));
    }
 
-   int    type = (signal == 1) ? OP_BUY  : OP_SELL;
-   string dir  = (signal == 1) ? "BUY"   : "SELL";
+   int    type = (signal == 1) ? OP_BUY   : OP_SELL;
+   string dir  = (signal == 1) ? "BUY"    : "SELL";
    color  clr  = (signal == 1) ? clrGreen : clrRed;
 
    int ticket = OrderSend(Symbol(), type, lot, price, 5, sl, tp,
@@ -326,13 +324,10 @@ void OpenTrade(int signal, double riskAmt)
 }
 
 //+------------------------------------------------------------------+
-//| Dynamic trailing: SL artėja prie kainos kai pelnas auga         |
-//|                                                                  |
-//| Pelnas < 50% investicijos  → ATR × 1.5 (normalus atstumas)     |
+//| Dynamic trailing stop                                            |
+//| Pelnas < 50% investicijos  → ATR × 1.5 (normalus)              |
 //| Pelnas 50–99% investicijos → ATR × 1.0 (artimesnis)            |
 //| Pelnas ≥ 100% investicijos → ATR × 0.5 (labai artimas)         |
-//|                                                                  |
-//| Rezultatas: kuo didesnis pelnas, tuo greičiau užsidaro          |
 //+------------------------------------------------------------------+
 void ManageOpenTrades()
 {
@@ -349,7 +344,6 @@ void ManageOpenTrades()
       double atr    = iATR(NULL, 0, ATR_Period, 1);
       double profit = OrderProfit();
 
-      // Pasirinkti trailing multiplier pagal dabartinį pelną
       double profitRatio = (invest > 0) ? (profit / invest) : 0.0;
       double trailMult;
       string trailLabel;
@@ -421,7 +415,7 @@ void ResetDailyBalance()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("EMA200 Cross EA v5.0 sustabdytas | Balansas: ",
+   Print("EMA200 Cross EA v5.1 sustabdytas | Balansas: ",
          DoubleToString(AccountBalance(), 2), "€");
 }
 //+------------------------------------------------------------------+
