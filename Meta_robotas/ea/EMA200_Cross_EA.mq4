@@ -31,9 +31,9 @@ input double MaxPortfolioRisk = 20.0;  // Max bendra rizika % nuo balanso
 // ─── FILTRAI ──────────────────────────────────────────────────────
 input int    MaxDailyLosses   = 3;     // Maks. nuostolių per dieną šiai porai
 input double MaxDailyLossPct  = 20.0;  // Dienos nuostolių limitas % nuo balanso
-input bool   UseSessionFilter = true;  // Sesijų filtras
-input int    Session_Start    = 7;     // Sesijos pradžia GMT
-input int    Session_End      = 17;    // Sesijos pabaiga GMT
+input bool   UseSessionFilter = false; // Sesijų filtras (false = 24h)
+input int    Session_Start    = 7;     // Sesijos pradžia GMT (jei filtras įjungtas)
+input int    Session_End      = 17;    // Sesijos pabaiga GMT (jei filtras įjungtas)
 input bool   ShowDebug        = true;  // Debug žurnalas
 input int    MagicNumber      = 20250101;
 input string EA_Comment       = "EMA200_Cross";
