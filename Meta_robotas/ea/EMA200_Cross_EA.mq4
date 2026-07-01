@@ -40,9 +40,10 @@ input int    MagicNumber      = 20250101;
 input string EA_Comment       = "EMA200_Cross";
 
 // ─── GLOBALŪS ─────────────────────────────────────────────────────
-double   g_DayStartBalance = 0;
-datetime g_LastTradeDay    = 0;
-datetime g_LastBarTime     = 0;
+double   g_DayStartBalance  = 0;
+datetime g_LastTradeDay     = 0;
+bool     g_WasAboveEMA      = false; // Paskutinė žinoma padėtis vs EMA200
+bool     g_EMAStateInited   = false; // Ar pradinė padėtis nustatyta
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -199,11 +200,27 @@ int GetOpenDirection()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   if (Time[0] == g_LastBarTime) return;
-   g_LastBarTime = Time[0];
-
    ResetDailyBalance();
    ManageOpenTrades();   // Trailing valdymas VISADA — net už sesijos ribų
+
+   // ─── EMA200 REALAUS LAIKO APTIKIMAS ──────────────────────────
+   double ema0     = iMA(NULL, 0, EMA_Period, 0, MODE_EMA, PRICE_CLOSE, 0);
+   bool   isAbove  = (Bid > ema0);
+
+   // Pirmą kartą — nustatyti pradinę padėtį (nesignalizuoti)
+   if (!g_EMAStateInited)
+   {
+      g_WasAboveEMA    = isAbove;
+      g_EMAStateInited = true;
+      return;
+   }
+
+   bool crossUp   = (!g_WasAboveEMA && isAbove);   // Kaina kerta AUKŠTYN
+   bool crossDown = ( g_WasAboveEMA && !isAbove);  // Kaina kerta ŽEMYN
+
+   g_WasAboveEMA = isAbove;  // Išsaugoti dabartinę padėtį
+
+   if (!crossUp && !crossDown) return;  // Nėra kirtimo — nieko nedaryti
 
    // ─── DIENOS NUOSTOLIŲ LIMITAS (šiai porai) ────────────────────
    int dailyLosses = CountDailyLosses();
@@ -241,24 +258,16 @@ void OnTick()
       }
    }
 
-   // ─── EMA200 KIRTIMO APTIKIMAS ─────────────────────────────────
-   double ema1 = iMA(NULL, 0, EMA_Period, 0, MODE_EMA, PRICE_CLOSE, 1);
-   double ema2 = iMA(NULL, 0, EMA_Period, 0, MODE_EMA, PRICE_CLOSE, 2);
-
-   bool crossUp   = (Close[2] < ema2) && (Close[1] > ema1);
-   bool crossDown = (Close[2] > ema2) && (Close[1] < ema1);
-
-   if (!crossUp && !crossDown) return;  // Nėra signalo — nieko nedaryti
-
    int    openDir = GetOpenDirection();
    double invest  = GetInvestmentAmount();
    double riskNow = invest * SL_Percent / 100.0;
 
    if (ShowDebug)
       Print("[SIGNALAS] ", (crossUp ? "AUKŠTYN" : "ŽEMYN"),
-            " | Balansas: ", DoubleToString(AccountBalance(), 2),
-            "€ | Investicija: ", DoubleToString(invest, 2),
-            "€ | Rizika/sandoriui: ", DoubleToString(riskNow, 2), "€");
+            " | Bid: ", DoubleToString(Bid, Digits),
+            " | EMA200: ", DoubleToString(ema0, Digits),
+            " | Investicija: ", DoubleToString(invest, 2),
+            "€ | Rizika: ", DoubleToString(riskNow, 2), "€");
 
    // ─── REVERSAL: priešinga kryptis → uždaryti ir apsisukti ──────
    if (crossUp && openDir == -1)
