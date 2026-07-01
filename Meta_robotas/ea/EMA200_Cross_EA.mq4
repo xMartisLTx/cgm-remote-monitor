@@ -21,10 +21,11 @@ input double Trailing50pct    = 1.0;   // Trailing kai pelnas >= 50% investicijo
 input double Trailing100pct   = 0.5;   // Trailing kai pelnas >= 100% investicijos
 
 // ─── RIZIKA ───────────────────────────────────────────────────────
-input double StartBalance     = 50.0;  // Pradinis balansas (bazė)
+input double StartBalance     = 50.0;  // Pradinis balansas (bazė compound skaičiavimui)
 input double InvestmentBase   = 10.0;  // Pradinė investicija EUR
 input double BalanceStep      = 30.0;  // Kas +30€ balanse → investicija +10€
 input double InvestmentStep   = 10.0;  // Investicijos padidėjimas EUR
+input double MaxInvestment    = 100.0; // Maksimali investicija EUR (riba)
 input double SL_Percent       = 20.0;  // SL nuostolis % nuo investicijos (20%=2€)
 input double MaxPortfolioRisk = 20.0;  // Max bendra rizika % nuo balanso
 
@@ -61,9 +62,10 @@ int OnInit()
 //+------------------------------------------------------------------+
 double GetInvestmentAmount()
 {
-   double steps = MathFloor((AccountBalance() - StartBalance) / BalanceStep);
+   double steps  = MathFloor((AccountBalance() - StartBalance) / BalanceStep);
    if (steps < 0) steps = 0;
-   return InvestmentBase + steps * InvestmentStep;
+   double invest = InvestmentBase + steps * InvestmentStep;
+   return MathMin(invest, MaxInvestment);
 }
 
 //+------------------------------------------------------------------+
