@@ -377,7 +377,7 @@ void ManageOpenTrades()
       if (OrderType() == OP_BUY)
       {
          double newSL = NormalizeDouble(Bid - atr * trailMult, Digits);
-         if (newSL > sl && newSL > op)
+         if (newSL > sl)   // SL kyla kartu su kaina nuo pat pradžių
          {
             if (OrderModify(OrderTicket(), op, newSL, OrderTakeProfit(), 0, clrBlue))
             {
@@ -393,7 +393,7 @@ void ManageOpenTrades()
       else if (OrderType() == OP_SELL)
       {
          double newSL = NormalizeDouble(Ask + atr * trailMult, Digits);
-         if ((sl == 0 || newSL < sl) && newSL < op)
+         if (sl == 0 || newSL < sl)   // SL leidžiasi kartu su kaina nuo pat pradžių
          {
             if (OrderModify(OrderTicket(), op, newSL, OrderTakeProfit(), 0, clrBlue))
             {
