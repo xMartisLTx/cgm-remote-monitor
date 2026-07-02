@@ -13,7 +13,6 @@
 // ─── PAGRINDINIAI NUSTATYMAI ──────────────────────────────────────
 input int    EMA_Period       = 200;   // EMA periodas (raudona linija)
 input int    ATR_Period       = 14;    // ATR periodas
-input double RR_TP            = 3.0;   // Take-Profit RR (atsarginis)
 
 // ─── TRAILING STOP NUSTATYMAI ─────────────────────────────────────
 input double TrailingATR      = 1.5;   // Normalus trailing (ATR kartotinis)
@@ -299,10 +298,9 @@ void OpenTrade(int signal, double riskAmt)
    double slDist = atr * TrailingATR;
    double price  = (signal == 1) ? Ask : Bid;
    double sl     = (signal == 1) ? price - slDist : price + slDist;
-   double tp     = (signal == 1) ? price + slDist * RR_TP : price - slDist * RR_TP;
+   double tp     = 0; // Nėra fiksuoto TP — uždaro tik trailing SL arba reversal
 
    sl = NormalizeDouble(sl, Digits);
-   tp = NormalizeDouble(tp, Digits);
 
    double tickVal  = MarketInfo(Symbol(), MODE_TICKVALUE);
    double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
