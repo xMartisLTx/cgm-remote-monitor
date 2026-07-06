@@ -1,13 +1,14 @@
 //+------------------------------------------------------------------+
-//| EMA200 Cross EA v5.1                                             |
+//| EMA200 Cross EA v5.4                                             |
 //| 1. Reversal: kaina kerta atgal → uždaro ir atidaro priešingą   |
 //| 2. Compound: kas +30€ balansas → +10€ investicija              |
 //| 3. Portfolio rizika: SL suma negali viršyti 20% balanso         |
-//| 4. Sesija: tik nauji sandoriai blokuojami; esami valdomi 24/7  |
+//| 4. SL seka kainą nuo pat atidarymo (trailing visada aktyvus)   |
 //| 5. Dynamic trailing: prie 50%/100% pelno → SL artimesnis       |
+//| 6. Nėra fiksuoto TP — uždaro tik SL arba reversal              |
 //+------------------------------------------------------------------+
-#property copyright "Forex Signalai v5.1"
-#property version   "5.1"
+#property copyright "Forex Signalai v5.4"
+#property version   "5.4"
 #property strict
 
 // ─── PAGRINDINIAI NUSTATYMAI ──────────────────────────────────────
@@ -48,7 +49,7 @@ bool     g_EMAStateInited   = false; // Ar pradinė padėtis nustatyta
 int OnInit()
 {
    g_DayStartBalance = AccountBalance();
-   Print("=== EMA200 Cross EA v5.1 paleistas ===");
+   Print("=== EMA200 Cross EA v5.4 paleistas ===");
    Print("Pora: ", Symbol(), " | Portfolio rizika: ", MaxPortfolioRisk,
          "% | Max nuostoliai/dieną: ", MaxDailyLosses);
    Print("Trailing: normalus ATR×", TrailingATR,
@@ -348,7 +349,6 @@ void ManageOpenTrades()
       if (OrderMagicNumber() != MagicNumber)           continue;
       if (OrderSymbol() != Symbol())                   continue;
 
-      double op     = OrderOpenPrice();
       double sl     = OrderStopLoss();
       double atr    = iATR(NULL, 0, ATR_Period, 1);
       double profit = OrderProfit();
@@ -424,7 +424,7 @@ void ResetDailyBalance()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("EMA200 Cross EA v5.1 sustabdytas | Balansas: ",
+   Print("EMA200 Cross EA v5.4 sustabdytas | Balansas: ",
          DoubleToString(AccountBalance(), 2), "€");
 }
 //+------------------------------------------------------------------+
