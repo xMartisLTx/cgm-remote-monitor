@@ -42,13 +42,15 @@ input string EA_Comment       = "EMA200_Cross";
 // ─── GLOBALŪS ─────────────────────────────────────────────────────
 double   g_DayStartBalance  = 0;
 datetime g_LastTradeDay     = 0;
-bool     g_WasAboveEMA      = false; // Paskutinė žinoma padėtis vs EMA200
-bool     g_EMAStateInited   = false; // Ar pradinė padėtis nustatyta
+bool     g_WasAboveEMA      = false;
+bool     g_EMAStateInited   = false;
+int      g_LastHistoryTotal = 0;     // Stebima istorija naujų sandorių aptikimui
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   g_DayStartBalance = AccountBalance();
+   g_DayStartBalance   = AccountBalance();
+   g_LastHistoryTotal  = OrdersHistoryTotal();
    Print("=== EMA200 Cross EA v5.4 paleistas ===");
    Print("Pora: ", Symbol(), " | Portfolio rizika: ", MaxPortfolioRisk,
          "% | Max nuostoliai/dieną: ", MaxDailyLosses);
@@ -198,9 +200,69 @@ int GetOpenDirection()
 }
 
 //+------------------------------------------------------------------+
+//| Išsaugo uždarytą sandorį į CSV failą                            |
+//+------------------------------------------------------------------+
+void LogClosedTrade()
+{
+   string filename = "EMA200_log_" + Symbol() + ".csv";
+   bool   newFile  = (FileSize(filename) == 0 || !FileIsExist(filename));
+   int    handle   = FileOpen(filename, FILE_CSV|FILE_READ|FILE_WRITE, ',');
+   if (handle == INVALID_HANDLE) return;
+
+   FileSeek(handle, 0, SEEK_END);
+
+   if (newFile)
+      FileWrite(handle,
+         "Data", "Pora", "Tipas", "Entry", "Exit", "SL_atidarymo",
+         "Lotai", "Pelnas_EUR", "Priezastis");
+
+   string tipas    = (OrderType() == OP_BUY) ? "BUY" : "SELL";
+   string priezast = "Reversal";
+   string com      = OrderComment();
+   if (StringFind(com, "[tp]") >= 0) priezast = "TP";
+   if (StringFind(com, "[sl]") >= 0) priezast = "SL";
+   double pelnas   = OrderProfit() + OrderSwap() + OrderCommission();
+
+   FileWrite(handle,
+      TimeToString(OrderCloseTime(), TIME_DATE|TIME_MINUTES),
+      OrderSymbol(),
+      tipas,
+      DoubleToString(OrderOpenPrice(),  Digits),
+      DoubleToString(OrderClosePrice(), Digits),
+      DoubleToString(OrderStopLoss(),   Digits),
+      DoubleToString(OrderLots(), 2),
+      DoubleToString(pelnas, 2),
+      priezast);
+
+   FileClose(handle);
+   Print("[LOG] Sandoris išsaugotas → ", filename,
+         " | ", tipas, " | Pelnas: ", DoubleToString(pelnas, 2), "€ | ", priezast);
+}
+
+//+------------------------------------------------------------------+
+//| Tikrina ar atsirado naujų uždarytų sandorių ir juos užregistruoja|
+//+------------------------------------------------------------------+
+void CheckClosedTrades()
+{
+   int total = OrdersHistoryTotal();
+   if (total <= g_LastHistoryTotal) return;
+
+   for (int i = g_LastHistoryTotal; i < total; i++)
+   {
+      if (!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
+      if (OrderMagicNumber() != MagicNumber)            continue;
+      if (OrderSymbol() != Symbol())                    continue;
+      if (OrderType() > OP_SELL)                        continue;
+      LogClosedTrade();
+   }
+   g_LastHistoryTotal = total;
+}
+
+//+------------------------------------------------------------------+
 void OnTick()
 {
    ResetDailyBalance();
+   CheckClosedTrades();  // Patikrina ar užsidarė sandoriai → rašo į CSV
    ManageOpenTrades();   // Trailing valdymas VISADA — net už sesijos ribų
 
    // ─── EMA200 REALAUS LAIKO APTIKIMAS ──────────────────────────
